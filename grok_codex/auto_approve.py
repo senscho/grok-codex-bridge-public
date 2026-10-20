@@ -113,6 +113,8 @@ def watch(sid: str, *, interval: float = 1, api=call, pause=time.sleep, emit=pri
             reason = denial(details.get(aid, {}), files, status['repo'])
             handled.add(aid)
             if reason:
+                api('/sessions/hold', {'session_id':sid, 'request_id':aid, 'reason':reason},
+                    key='local-yolo-held-'+aid)
                 # Never print raw command/model text; JSON escapes terminal controls.
                 emit(json.dumps({'pending_for_human': aid, 'reason': reason, 'session': sid}))
                 continue

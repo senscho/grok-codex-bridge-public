@@ -25,57 +25,87 @@ class Dispatcher:
         self.wake = asyncio.Event()
         self.expire()
 
-    def expire(self) -> None:
-        """Suppress stale notifications, retaining local events for inspection.
+    def pending_approval(self, event: dict) -> bool:
+        if event['kind'] not in {'approval/required', 'approval/held'}:
+            return False
+        data = event['data']
+        if isinstance(data, str):
+            data = json.loads(data)
+        return bool(self.store.one(
+            "SELECT id FROM approvals WHERE id=? AND session_id=? AND status IN ('pending','responding','uncertain')",
+            (data.get('request_id'), event['session_id'])))
 
-        Legacy outboxes did not record source age; resolve it from their sequence
-        range so a freshly batched historical event cannot acquire a fresh TTL.
+    def source_events(self, payload: dict) -> list[dict]:
+        return self.store.all('SELECT * FROM events WHERE session_id=? AND seq BETWEEN ? AND ?',
+                              (payload.get('session_id'), payload.get('from_seq'), payload.get('to_seq')))
+
+    def expire(self) -> None:
+        """Age from source time, never retry/batch time; preserve unresolved approvals.
+
+        Suppress legacy progress-only deliveries immediately when progress is off.
+        Events/logs stay local even when their notification expires or is filtered.
         """
         cutoff = time.time() - self.settings.webhook_max_event_age_sec
         with self.store.db:
-            self.store.db.execute('UPDATE events SET batched=1 WHERE batched=0 AND time<?', (cutoff,))
+            for event in self.store.all('SELECT * FROM events WHERE batched=0 AND time<?', (cutoff,)):
+                if not self.pending_approval(event):
+                    self.store.db.execute('UPDATE events SET batched=1 WHERE seq=?', (event['seq'],))
             for row in self.store.all("SELECT id,payload FROM deliveries WHERE status='pending'"):
                 payload = json.loads(row['payload'])
-                event_time = payload.get('event_time')
-                if event_time is None:
-                    source = self.store.one(
-                        'SELECT MAX(time) AS time FROM events WHERE session_id=? AND seq BETWEEN ? AND ?',
-                        (payload.get('session_id'), payload.get('from_seq'), payload.get('to_seq')))
-                    event_time = source['time'] if source and source['time'] is not None else payload['timestamp']
+                kinds = set(payload.get('summary', {})) | {e['kind'] for e in payload.get('events', [])}
+                if not self.settings.webhook_progress and not kinds.intersection(self.settings.webhook_events):
+                    self.store.db.execute("UPDATE deliveries SET status='suppressed' WHERE id=?", (row['id'],))
+                    continue
+                source = self.source_events(payload)
+                if any(self.pending_approval(event) for event in source):
+                    continue
+                # Legacy payloads may have a newly minted timestamp for old events.
+                event_time = max((event['time'] for event in source), default=payload.get('event_time', payload['timestamp']))
                 if event_time < cutoff:
                     self.store.db.execute("UPDATE deliveries SET status='expired' WHERE id=?", (row['id'],))
 
     def batch(self, force: bool = False) -> None:
-        """Atomically move events into a durable outbox. Metadata only leaves host."""
+        """Notable events bypass interval batching. Progress is explicit opt-in."""
         self.expire()
         now = time.time()
-        progress = force or now - self.last_progress >= self.settings.progress_interval
-        rows = self.store.all('SELECT * FROM events WHERE batched=0' + ('' if progress else ' AND urgent=1') + ' ORDER BY seq LIMIT 1000')
+        progress = self.settings.webhook_progress and (force or now - self.last_progress >= self.settings.progress_interval)
+        kinds = self.settings.webhook_events
+        selection = '' if progress else ' AND kind IN (' + ','.join('?' for _ in kinds) + ')'
+        rows = self.store.all('SELECT * FROM events WHERE batched=0' + selection + " ORDER BY CASE WHEN kind IN ('approval/required','approval/held') THEN 0 ELSE 1 END,seq LIMIT 1000",
+                              () if progress else kinds)
         if progress:
             self.last_progress = now
-        if not rows:
-            return
         groups: dict[str, list[dict]] = {}
-        for r in rows:
-            # An urgent event is its own delivery; progress is grouped by session.
-            key = r['id'] if r['urgent'] else r['session_id']
-            groups.setdefault(key, []).append(r)
+        for event in rows:
+            event['urgent'] = int(event['kind'] in kinds)
+            key = event['id'] if event['urgent'] else event['session_id']
+            groups.setdefault(key, []).append(event)
         with self.store.db:
             for group in groups.values():
                 did = uid()
                 payload = {'event_id': did, 'session_id': group[0]['session_id'], 'timestamp': now,
                            'event_time': max(r['time'] for r in group),
                            'from_seq': group[0]['seq'], 'to_seq': group[-1]['seq'],
-                           'events': [{'id': r['id'], 'seq': r['seq'], 'kind': r['kind'], 'time': r['time']} for r in group if r['urgent']],
+                           'events': [self.metadata(r) for r in group if r['urgent']],
                            'summary': dict(Counter(r['kind'] for r in group))}
                 self.store.db.execute('INSERT INTO deliveries(id,payload,due) VALUES(?,?,?)', (did,json.dumps(payload),now))
-                self.store.db.executemany('UPDATE events SET batched=1 WHERE seq=?', [(r['seq'],) for r in group])
+                self.store.db.executemany('UPDATE events SET batched=1,urgent=? WHERE seq=?', [(r['urgent'],r['seq']) for r in group])
+
+    @staticmethod
+    def metadata(event: dict) -> dict:
+        data = json.loads(event['data'])
+        # Explicit metadata allowlist: no command, source, reason or model text.
+        safe = {key: data[key] for key in ('status','turn_id','job_id','request_id','used_percent',
+                                         'resets_at','window','window_duration_mins','known_window_resets') if key in data}
+        return {'id':event['id'], 'seq':event['seq'], 'kind':event['kind'], 'time':event['time'], **safe}
 
     async def tick(self) -> None:
         if not self.settings.webhook_url:
             return
         self.batch()
-        rows = self.store.all("SELECT * FROM deliveries WHERE status='pending' AND due<=? ORDER BY due LIMIT 20", (time.time(),))
+        rows = self.store.all('''SELECT * FROM deliveries WHERE status="pending" AND due<=?
+            ORDER BY (COALESCE(json_extract(payload, '$.summary."approval/required"'),0)
+                    + COALESCE(json_extract(payload, '$.summary."approval/held"'),0)) DESC,due LIMIT 20''', (time.time(),))
         for r in rows:
             timestamp = str(int(time.time()))
             body = r['payload'].encode()

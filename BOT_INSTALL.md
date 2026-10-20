@@ -21,7 +21,7 @@ another bot without access to that bot's environment.
 4. Import the three [bot skills](#skills-and-backup-monitoring) and create a
    webhook-triggered alert routine **on the bot that owns Codex work** using
    the bot platform's routine management interface. Configure the routine to
-   accept bridge JSON metadata, deduplicate `event_id`, examine `events` and
+   accept bridge JSON metadata (notable-only by default), deduplicate `event_id`, examine `events` and
    `summary`, and fetch current state using `codex_status`/`codex_logs`.
    Verify `X-Bridge-Signature` and timestamp freshness if the receiver supports it:
    the signature is `sha256=` plus HMAC-SHA256 over
@@ -51,11 +51,15 @@ Suggested routine behavior:
 
 ```text
 Deduplicate event_id. Fetch current session state.
-Alert for approval/required, account/authentication_required, or process/lost
-(approval pending, login expired, process disconnected).
+Alert for approval/required, approval/held, account/authentication_required,
+account/authentication_expired, process/lost or job/uncertain.
+For approval/held, fetch logs and say what was held and the deny/unknown reason.
+For usage/limitNear or usage/limitReached, report once with reset time if known.
 Send a short wrap-up for turn/completed or current failed turns/errors.
 Ignore resolved/stale conditions after checking current state.
-Ignore progress-only deliveries and delivery bodies older than 15 minutes.
+Ignore progress-only and ordinary deliveries older than 15 minutes from source
+event_time. For approval/required or approval/held, check current state first:
+a still-unresolved approval is exempt from expiry.
 Never accept an approval or request the human token.
 Never automatically resend interrupted/uncertain work.
 ```
@@ -65,11 +69,13 @@ Use the alert template to classify them; “urgent delivery” alone is not a re
 to alert a human. Approval decisions happen on the Mac via
 `grok-codex attach SESSION_ID` and `/approve REQUEST_ID accept|decline|cancel`.
 
-Notifications older than `BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC` (default 15 minutes)
-expire before delivery/retry, including across restart. Poll status after a long
+Ordinary notifications older than `BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC` (default 15
+minutes from source event time) expire before delivery/retry, including across
+restart. Unresolved approval/required and approval/held notifications are exempt. Poll status after a long
 outage. Idle sessions can resume automatically; in-flight turns are interrupted
-and never automatically replayed. A web viewer and detach webhook event are
-**planned**, so do not build routine logic that expects either today.
+and never automatically replayed. A web viewer and automatic tmux-detach detection are **planned**. Explicit
+bridge-terminal exit (`/quit`, `/detach`, EOF or Ctrl-C) emits `session/detached`;
+it does not transfer ownership or mean the Codex process stopped.
 
 ## Skills and backup monitoring
 
@@ -104,3 +110,22 @@ deny rules are heuristic and cannot uncover all hidden side effects. It leaves
 denied/unknown requests pending, exits on idle or Ctrl-C, and needs a new opt-in
 for later turns. See the [risks and usage](README.md#optional-per-session-yolo-helper).
 Neither notification routine ever accepts approvals, even in YOLO sessions.
+
+## Quiet webhook configuration
+
+On the Mac, `BRIDGE_WEBHOOK_PROGRESS=0` is the default. Only kinds selected by
+`BRIDGE_WEBHOOK_EVENTS` cause routine deliveries; the default includes approvals,
+YOLO holds, finished turns/errors, authentication expiry/requirements, lost
+processes/uncertain jobs, explicit terminal detach and near/exhausted usage limits.
+See the full list and protocol mapping in the [README](README.md#notable-only-delivery-by-default)
+and [.env.example](.env.example). Changes require a daemon restart. Legacy queued
+progress-only deliveries are suppressed when progress is off. Do not opt into
+`BRIDGE_WEBHOOK_PROGRESS=1` unless the routine can handle interval-based wakes.
+`BRIDGE_PROGRESS_INTERVAL` applies only to that optional progress batching.
+
+`BRIDGE_USAGE_ALERT_PERCENT=90` controls the near-limit threshold. Near alerts are
+deduplicated per account/window across sessions and restart. Exhaustion reports
+use known reset times; missing reset metadata is not a reason to invent a time or
+retry work. Neither notification routine spends credits, switches accounts or
+accepts approvals. A YOLO hold is a notification and leaves the request pending;
+only the owner resolves it locally.

@@ -79,3 +79,21 @@ def test_settings_require_secure_configuration(tmp_path):
     for url in ['http://example.com','https://user:pass@example.com','https://example.com?token=bad']:
         with pytest.raises(ValueError):
             Settings(state_dir=tmp_path,grok_token='g'*40,human_token='h'*40,webhook_url=url,webhook_secret='s'*40).validate()
+
+
+async def test_human_held_and_detach_endpoints_are_idempotent(client,bridge,settings):
+    from tests.test_sessions import start
+    sid = await start(bridge,settings)
+    await bridge.notification(sid,{'id':21,'method':'item/commandExecution/requestApproval',
+                                  'params':{'command':'git push'}})
+    aid = bridge.status(sid)['approvals'][0]['id']
+    body = {'session_id':sid,'request_id':aid,'reason':'push rule'}
+    assert (await client.post('/sessions/hold',json=body,headers=headers(settings,key='grok-hold'))).status_code == 403
+    for _ in range(2):
+        assert (await client.post('/sessions/hold',json=body,headers=headers(settings,'human','held-key'))).status_code == 200
+    assert len(bridge.store.all("SELECT * FROM events WHERE kind='approval/held'")) == 1
+    assert (await client.post('/sessions/detach',json={'session_id':sid},headers=headers(settings,key='grok-detach'))).status_code == 403
+    for _ in range(2):
+        assert (await client.post('/sessions/detach',json={'session_id':sid},headers=headers(settings,'human','detach-key'))).status_code == 200
+    assert len(bridge.store.all("SELECT * FROM events WHERE kind='session/detached'")) == 1
+    assert bridge.status(sid)['owner'] == 'grok'  # Detach does not change ownership.

@@ -14,6 +14,7 @@ from .config import Settings
 from .protocol import AppServer, LaunchError, RpcError
 from .store import Store, uid
 from .webhooks import Dispatcher
+from .usage import UsageAlerts
 
 
 class Conflict(ValueError):
@@ -37,6 +38,7 @@ class Bridge:
         self.locks: dict[str, asyncio.Lock] = {}
         self.tasks: set[asyncio.Task] = set()
         self.dispatcher = Dispatcher(self.store, settings)
+        self.usage = UsageAlerts(self.store, settings, self.event)
         self.dispatch_task: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
         self.idempotency_lock = asyncio.Lock()
@@ -46,8 +48,8 @@ class Bridge:
     def lock(self, sid: str) -> asyncio.Lock:
         return self.locks.setdefault(sid, asyncio.Lock())
 
-    def event(self, sid: str, kind: str, data: dict | None = None, urgent: bool = False) -> None:
-        self.store.event(sid, kind, data, urgent)
+    def event(self, sid: str, kind: str, data: dict | None = None) -> None:
+        self.store.event(sid, kind, data, kind in self.settings.webhook_events)
         self.dispatcher.wake.set()
 
     def spawn(self, coroutine: Any) -> None:
@@ -64,8 +66,11 @@ class Bridge:
     async def startup(self) -> None:
         self.dispatch_task = asyncio.create_task(self.dispatcher.run())
         # Reconcile jobs before any new work is accepted. No prompt replay.
+        interrupted = self.store.all("SELECT id,session_id FROM jobs WHERE status IN ('queued','dispatching','running')")
         self.store.execute("UPDATE jobs SET status='uncertain',detail='Daemon restarted; inspect history before resubmitting' WHERE status IN ('queued','dispatching','running')")
         self.store.execute("UPDATE approvals SET status='stale' WHERE status IN ('pending','responding')")
+        for job in interrupted:
+            self.event(job['session_id'], 'job/uncertain', {'job_id':job['id'], 'status':'uncertain'})
         self.recovery_task = asyncio.create_task(self._recover_all())
 
     async def _recover_all(self) -> None:
@@ -73,7 +78,7 @@ class Bridge:
             async with self.lock(s['id']):
                 if self._pid_alive(s['pid']):
                     self.store.update(s['id'], status='recovery_blocked')
-                    self.event(s['id'], 'recovery/blocked', {'reason': 'Recorded process still exists; verify and terminate it before resume'}, True)
+                    self.event(s['id'], 'recovery/blocked', {'reason': 'Recorded process still exists; verify and terminate it before resume'})
                     continue
                 self.store.update(s['id'], status='interrupted', pid=None, turn_id=None)
                 if s['thread_id']:
@@ -82,7 +87,7 @@ class Bridge:
                     except Exception as e:
                         self._failure(s['id'], None, e)
                 else:
-                    self.event(s['id'], 'recovery/interrupted', {'reason': 'Thread creation was interrupted; original prompt is not replayed'}, True)
+                    self.event(s['id'], 'recovery/interrupted', {'reason': 'Thread creation was interrupted; original prompt is not replayed'})
 
     @staticmethod
     def _pid_alive(pid: int | None) -> bool:
@@ -226,9 +231,18 @@ class Bridge:
         self.store.update(sid,status='interrupted' if uncertain else 'error')
         if jid:
             self.store.execute('UPDATE jobs SET status=?,detail=? WHERE id=?',('uncertain' if uncertain else 'failed',detail,jid))
-        self.event(sid,'bridge/error',{'reason':detail,'error_type':type(error).__name__},True)
-        if isinstance(error,RpcError) and re.search(r'auth|401|403|login|token',str(error),re.I):
-            self.event(sid,'account/authentication_required',{},True)
+        self.event(sid,'bridge/error',{'reason':detail,'error_type':type(error).__name__})
+        self.event(sid,'job/uncertain' if uncertain else 'error',
+                   {'reason':detail,'error_type':type(error).__name__,'job_id':jid,'status':'uncertain' if uncertain else 'failed'})
+        self.usage.reached(sid, self.store.session(sid)['account'], jid or sid, str(error))
+        if isinstance(error,RpcError):
+            self.authentication_event(sid,str(error))
+
+    def authentication_event(self, sid: str, error: Any) -> None:
+        text = json.dumps(error)
+        if re.search(r'auth|\b401\b|\b403\b|login|unauthorized|token.{0,30}(?:invalid|expir)', text, re.I):
+            kind = 'account/authentication_expired' if re.search(r'expir',text,re.I) else 'account/authentication_required'
+            self.event(sid,kind,{'status':'authentication_required'})
 
     async def _resume(self, sid: str, recovery: bool = False) -> dict:
         s = self.store.session(sid)
@@ -271,7 +285,7 @@ class Bridge:
             if not s['turn_id'] or sid not in self.servers or s['status'] not in {'running','approval'}:
                 raise Conflict('No active turn to interrupt')
             await self.servers[sid].request('turn/interrupt',{'threadId':s['thread_id'],'turnId':s['turn_id']})
-            self.event(sid,'turn/interrupt_requested',{},True)
+            self.event(sid,'turn/interrupt_requested',{})
             return self.status(sid)
 
     async def stop(self, sid: str, actor: str) -> dict:
@@ -284,7 +298,7 @@ class Bridge:
             self.store.update(sid,status='stopped',turn_id=None,pid=None)
             self.store.execute("UPDATE approvals SET status='stale' WHERE session_id=? AND status='pending'",(sid,))
             self.store.execute("UPDATE jobs SET status='interrupted' WHERE session_id=? AND status IN ('queued','dispatching','running')",(sid,))
-            self.event(sid,'session/stopped',{},True)
+            self.event(sid,'session/stopped',{})
             return self.status(sid)
 
     async def control(self, sid: str, actor: str, owner: str) -> dict:
@@ -293,7 +307,7 @@ class Bridge:
         async with self.lock(sid):
             self.store.session(sid)
             self.store.update(sid,owner=owner)
-            self.event(sid,'control/changed',{'owner':owner},True)
+            self.event(sid,'control/changed',{'owner':owner})
             return self.status(sid)
 
     async def switch(self, sid: str, actor: str, account_id: str) -> dict:
@@ -316,15 +330,38 @@ class Bridge:
                 if sid in self.servers:
                     await self.servers.pop(sid).close()
                 self.store.update(sid,pid=None,status='interrupted')
-                self.event(sid,'account/switch_unavailable',{'account_id':account_id},True)
+                self.event(sid,'account/switch_unavailable',{'account_id':account_id})
                 try:
                     await self._resume(sid)
                 except Exception as e:
                     self._failure(sid,None,e)
                 raise Conflict('Thread is unavailable in target CODEX_HOME; original account retained. Use explicit handoff to a new session')
             self.store.update(sid,account=account_id,status='idle')
-            self.event(sid,'account/switched',{'account_id':account_id},True)
+            self.event(sid,'account/switched',{'account_id':account_id})
             return self.status(sid)
+
+    async def detach(self, sid: str, actor: str) -> dict:
+        if actor != 'human':
+            raise PermissionError('Detach notifications require human credentials')
+        self.store.session(sid)
+        self.event(sid, 'session/detached', {'status':'detached'})
+        return {'session_id':sid, 'status':'detached'}
+
+    async def hold(self, sid: str, actor: str, request_id: str, reason: str) -> dict:
+        if actor != 'human':
+            raise PermissionError('Recording held approvals requires human credentials')
+        async with self.lock(sid):
+            self.store.session(sid)
+            approval = self.store.one('SELECT * FROM approvals WHERE id=? AND session_id=?', (request_id,sid))
+            if not approval or approval['status'] != 'pending':
+                raise Conflict('Approval is no longer pending')
+            existing = self.store.one("SELECT id FROM events WHERE session_id=? AND kind='approval/held' AND json_extract(data,'$.request_id')=?", (sid,request_id))
+            if not existing:
+                original = self.store.one("SELECT data FROM events WHERE session_id=? AND kind='approval/required' AND json_extract(data,'$.request_id')=?", (sid,request_id))
+                data = json.loads(original['data']) if original else {}
+                self.event(sid, 'approval/held', {'request_id':request_id, 'status':'pending',
+                    'reason':redact(reason), 'command':redact(str(data.get('command',''))), 'method':approval['method']})
+            return {'request_id':request_id, 'status':'held'}
 
     async def approve(self, sid: str, actor: str, request_id: str, decision: str) -> dict:
         async with self.lock(sid):
@@ -349,7 +386,7 @@ class Bridge:
             self.store.execute("UPDATE approvals SET status='resolved' WHERE id=?",(request_id,))
             if self.store.session(sid)['status']=='approval' and not self.store.one("SELECT id FROM approvals WHERE session_id=? AND status='pending'",(sid,)):
                 self.store.update(sid,status='running')
-            self.event(sid,'approval/responded',{'request_id':request_id,'decision':decision},True)
+            self.event(sid,'approval/responded',{'request_id':request_id,'decision':decision})
             return {'request_id':request_id,'status':'resolved'}
 
     def status(self, sid: str) -> dict:
@@ -379,9 +416,9 @@ class Bridge:
                                               or p.get('grantRoot') or p.get('additionalPermissions')
                                               or p.get('networkApprovalContext') or p.get('proposedNetworkPolicyAmendments')
                                               or p.get('proposedExecpolicyAmendment')),
-                           'reason':redact(str(p.get('reason','')))},True)
+                           'reason':redact(str(p.get('reason','')))})
             else:
-                self.event(sid,'request/unsupported',{'method':method},True)
+                self.event(sid,'request/unsupported',{'method':method})
                 await self.servers[sid].write({'id':msg['id'],'error':{'code':-32601,'message':'Bridge does not support this request; denied'}})
             return
         if method=='bridge/processLost':
@@ -389,10 +426,12 @@ class Bridge:
             self.store.update(sid,status='interrupted',turn_id=None)
             self.store.execute("UPDATE approvals SET status='stale' WHERE session_id=? AND status IN ('pending','responding')",(sid,))
             self.store.execute("UPDATE jobs SET status='uncertain' WHERE session_id=? AND status IN ('running','dispatching')",(sid,))
-            self.event(sid,'process/lost',{},True)
+            self.event(sid,'process/lost',{'status':'interrupted'})
             # Reconnect is explicit: do not race an old process or active task.
             return
         data: dict[str, Any] = {}
+        if method=='account/rateLimits/updated':
+            self.usage.update(sid, self.store.session(sid)['account'], p['rateLimits'])
         turn = p.get('turn',{})
         if method=='turn/started':
             self.store.update(sid,status='running',turn_id=turn['id'])
@@ -405,8 +444,9 @@ class Bridge:
             self.store.execute("UPDATE approvals SET status='stale' WHERE session_id=? AND status='pending'",(sid,))
             data = {'turn_id':turn['id'],'status':status}
             error = turn.get('error')
-            if error and re.search(r'auth|401|403|login|token',json.dumps(error),re.I):
-                self.event(sid,'account/authentication_required',{},True)
+            self.usage.reached(sid, self.store.session(sid)['account'], turn['id'], error)
+            if error:
+                self.authentication_event(sid,error)
         elif method in {'item/started','item/completed'}:
             item = p.get('item',{})
             data = {'item_id':item.get('id'),'type':item.get('type'),'status':item.get('status')}
@@ -425,9 +465,9 @@ class Bridge:
             self.store.execute("UPDATE approvals SET status='resolved' WHERE session_id=? AND rpc_id=? AND status='pending'",(sid,json.dumps(p.get('requestId'))))
         elif method=='error':
             # Credential errors are recognized locally without exporting raw content.
-            text = json.dumps(p)
-            if re.search(r'auth|401|403|login|token',text,re.I):
-                self.event(sid,'account/authentication_required',{},True)
-            data = {'reason':'Codex reported an error','will_retry':p.get('willRetry',False)}
+            self.authentication_event(sid,p.get('error'))
+            self.usage.reached(sid, self.store.session(sid)['account'], p.get('turnId') or sid, p.get('error'))
+            data = {'reason':'Codex reported an error','will_retry':p.get('willRetry',False),
+                    'turn_id':p.get('turnId'), 'status':'retrying' if p.get('willRetry') else 'failed'}
         # Persist structured metadata for all events; never raw command/source payloads.
-        self.event(sid,method,data,method in {'turn/completed','error','serverRequest/resolved'} or 'authRecovery' in method)
+        self.event(sid,method,data)

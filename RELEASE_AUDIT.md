@@ -47,9 +47,73 @@ and test scope. Added helper regressions and fixed an inherited path-validation
 test whose temporary-path idempotency key could exceed the API length limit.
 The test now hashes that key so it continues to exercise path validation.
 
+## Follow-up: quiet notable webhooks and held approvals
+
+- Added `BRIDGE_WEBHOOK_EVENTS` with twelve default notable kinds (including
+  required/held approvals), `BRIDGE_WEBHOOK_PROGRESS=0` and
+  `BRIDGE_USAGE_ALERT_PERCENT=90`. Centralized urgency classification; normal
+  progress and administrative events remain local. Legacy queued progress-only
+  deliveries are suppressed when progress is off. Approval events get batch and
+  delivery priority over other backlog.
+- Notification age is measured from source time, including legacy payloads.
+  Unresolved required/held approvals are exempt from age expiry; after resolution
+  or staleness the normal cutoff applies. Filters/retry-attempt limits still apply.
+- Added account/window usage state and durable alert markers. Sparse updates use
+  the retained `RateLimitSnapshot` / `RateLimitWindow` field names: `usedPercent`,
+  `resetsAt`, `windowDurationMins`, `rateLimitReachedType`, `spendControlReached`
+  and individual-limit metadata. Near warnings deduplicate across sessions and
+  restarts. Errors use `codexErrorInfo` variants from `TurnError`; no reset field
+  is invented. Known but uncorrelated window resets are labeled observations.
+- Added the human-only `/sessions/hold` endpoint and helper integration. Denied or
+  unknown requests produce one `approval/held` event per request, with a redacted
+  command and reason in local logs, leaving the approval pending. The webhook
+  carries only allowlisted metadata, so the bot fetches held details via logs.
+- Added human-only explicit terminal-exit notifications via `/sessions/detach`;
+  `/quit`, `/detach`, EOF and Ctrl-C record `session/detached` without transferring
+  ownership. Automatic tmux detach detection remains planned.
+- Added a newly authored, credential-free `.env.example` and a narrow Git-ignore
+  exception for it. Updated generated config, OpenAPI, docs and all routine skills.
+  No private configuration was copied. Only targeted tests were run during work;
+  one final locked full-suite run is recorded below.
+
+## Current follow-up files
+
+27 files added or changed in the notable-webhook follow-up:
+
+- `.env.example`
+- `.gitignore`
+- `BOT_INSTALL.md`
+- `README.md`
+- `RELEASE_AUDIT.md`
+- `SECURITY.md`
+- `docs/TESTING.md`
+- `docs/flow.html`
+- `docs/mac-tutorial.html`
+- `docs/openapi.json`
+- `docs/setup-en.html`
+- `grok_codex/api.py`
+- `grok_codex/auto_approve.py`
+- `grok_codex/cli.py`
+- `grok_codex/config.py`
+- `grok_codex/service.py`
+- `grok_codex/store.py`
+- `grok_codex/usage.py`
+- `grok_codex/webhooks.py`
+- `skills/codex-approval-alert/SKILL.md`
+- `skills/codex-delegate/SKILL.md`
+- `skills/codex-session-watchdog/SKILL.md`
+- `tests/test_api.py`
+- `tests/test_approvals.py`
+- `tests/test_auto_approve.py`
+- `tests/test_usage.py`
+- `tests/test_webhooks.py`
+
 ## Validation
 
-- `uv run --locked pytest -q`: **130 passed, 1 skipped**. The skipped check is the
+- Current follow-up: `uv run --locked pytest -q` ran **exactly once** at the end:
+  **169 passed, 1 skipped** in 2.00 seconds. The skipped test is the optional
+  installed-Codex lifecycle check. Targeted checks were used during development.
+- Previous follow-up: **130 passed, 1 skipped**. The skipped check is the
   opt-in installed-Codex lifecycle integration test; no authenticated coding run
   or live bot webhook was performed for this release.
 - Unchanged connector: initial-release real MCP runtime smoke check registered
@@ -91,13 +155,14 @@ addresses and reserved example domains remain for runnable examples/tests.
 | `docs/protocol/schema/v2-ThreadResumeResponse.json` | 38 | Protocol description of a risk assessment framework; substring false positive. |
 | `docs/protocol/schema/v2-ThreadStartParams.json` | 9 | Protocol description of a risk assessment framework; substring false positive. |
 | `docs/protocol/schema/v2-TurnStartParams.json` | 31 | Protocol description of a risk assessment framework; substring false positive. |
-| `grok_codex/service.py` | 24 | Intentional secret-redaction regular expression. |
-| `grok_codex/service.py` | 26 | Intentional secret-redaction regular expression. |
+| `grok_codex/service.py` | 25 | Intentional secret-redaction regular expression. |
+| `grok_codex/service.py` | 27 | Intentional secret-redaction regular expression. |
 
 ## Complete release file list
 
-74 files; this audit is included.
+77 files; this audit is included.
 
+- `.env.example`
 - `.gitignore`
 - `.python-version`
 - `BOT_INSTALL.md`
@@ -148,6 +213,7 @@ addresses and reserved example domains remain for runnable examples/tests.
 - `grok_codex/protocol.py`
 - `grok_codex/service.py`
 - `grok_codex/store.py`
+- `grok_codex/usage.py`
 - `grok_codex/webhooks.py`
 - `pyproject.toml`
 - `scripts/auto-approve.sh`
@@ -169,6 +235,7 @@ addresses and reserved example domains remain for runnable examples/tests.
 - `tests/test_integration.py`
 - `tests/test_protocol.py`
 - `tests/test_sessions.py`
+- `tests/test_usage.py`
 - `tests/test_vertical.py`
 - `tests/test_webhooks.py`
 - `uv.lock`

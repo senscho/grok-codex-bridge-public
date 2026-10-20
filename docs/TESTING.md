@@ -45,3 +45,12 @@ The optional local approval helper has tests for deny rules, quoted commands,
 separate removal flags, sensitive paths, symlink escapes, complete file metadata,
 per-session isolation, held/stale requests, idle exit and API failure. Approval
 metadata remains redacted and Grok credentials still cannot accept approvals.
+
+Notable-only dispatch tests cover every default kind, suppression of legacy
+progress queues, custom filters, progress opt-in, source-time expiry, unresolved
+approval preservation and priority. Usage tests use retained schema field names
+and cover account/window deduplication across sessions/restart, sparse updates,
+quota-error/failed-turn correlation and known reset times. Held approvals have
+helper, human-only endpoint, redaction, one-event-per-request and unchanged
+pending-status coverage. During this follow-up only targeted tests run before
+one final locked full-suite run.

@@ -8,10 +8,12 @@ import httpx
 import pytest
 
 from grok_codex.webhooks import Dispatcher
+from grok_codex.config import DEFAULT_WEBHOOK_EVENTS
 
 
 @pytest.mark.parametrize('auth', ['', 'Authorization: per-routine-private-key', 'X-Receiver-Key: private:key'])
 async def test_retries_durable_ids_replay_and_coalescing(bridge,settings,auth):
+    settings.webhook_progress = True
     settings.webhook_auth_header = auth
     settings.webhook_url = 'https://callback.example/events'
     settings.webhook_secret = 's'*40
@@ -158,6 +160,7 @@ async def test_stale_backlog_expires_on_restart_and_redelivery(bridge, settings,
     settings.webhook_url = 'https://callback.example/events'
     settings.webhook_secret = 's'*40
     settings.webhook_max_event_age_sec = 900
+    settings.webhook_progress = True
     clock = [time.time()]
     monkeypatch.setattr('grok_codex.webhooks.time.time', lambda: clock[0])
     requests = []
@@ -201,3 +204,123 @@ def test_invalid_webhook_max_age(settings, monkeypatch, value):
     configured = Settings(state_dir=settings.state_dir, grok_token='g'*40, human_token='h'*40)
     with pytest.raises(ValueError, match='BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC'):
         configured.validate()
+
+
+async def test_default_no_progress_even_force_and_suppresses_legacy_queue(bridge, settings):
+    settings.webhook_url = 'https://callback.example/events'; settings.webhook_secret = 's'*40
+    requests = []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: requests.append(request) or httpx.Response(204))) as client:
+        dispatcher = Dispatcher(bridge.store, settings, client)
+        for kind in ['item/agentMessage/delta','session/started','approval/responded','control/changed','serverRequest/resolved']:
+            bridge.event('s', kind)
+        dispatcher.batch(force=True)
+        await dispatcher.tick()
+        assert not requests and not bridge.store.all('SELECT * FROM deliveries')
+        old = {'event_id':'old-progress', 'session_id':'s', 'timestamp':time.time(),
+               'events':[], 'summary':{'item/agentMessage/delta':50}}
+        bridge.store.execute('INSERT INTO deliveries(id,payload,due) VALUES(?,?,0)', ('old-progress',json.dumps(old)))
+        await dispatcher.tick()
+        assert not requests
+        assert bridge.store.one('SELECT status FROM deliveries')['status'] == 'suppressed'
+        assert all(not row['urgent'] for row in bridge.store.all('SELECT urgent FROM events'))
+
+
+@pytest.mark.parametrize('kind', DEFAULT_WEBHOOK_EVENTS)
+async def test_each_default_notable_once_and_metadata_only(bridge, settings, kind):
+    settings.webhook_url = 'https://callback.example/events'; settings.webhook_secret = 's'*40
+    requests = []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: requests.append(request) or httpx.Response(204))) as client:
+        dispatcher = Dispatcher(bridge.store, settings, client)
+        bridge.event('s', kind, {'status':'failed','command':'PRIVATE CODE','reason':'PRIVATE REASON'})
+        await dispatcher.tick(); await dispatcher.tick()
+        assert len(requests) == 1
+        payload = json.loads(requests[0].content)
+        assert payload['session_id'] == 's'
+        assert payload['events'][0]['kind'] == kind
+        assert payload['events'][0]['status'] == 'failed'
+        assert b'PRIVATE' not in requests[0].content
+        assert bridge.store.one('SELECT urgent FROM events')['urgent'] == 1
+
+
+async def test_custom_notable_filter_and_progress_interval(bridge, settings):
+    settings.webhook_url = 'https://callback.example/events'; settings.webhook_secret = 's'*40
+    settings.webhook_events = ('custom/notable',)
+    requests = []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: requests.append(request) or httpx.Response(204))) as client:
+        dispatcher = Dispatcher(bridge.store, settings, client)
+        bridge.event('s','turn/completed'); bridge.event('s','custom/notable')
+        await dispatcher.tick()
+        assert len(requests) == 1 and json.loads(requests[0].content)['events'][0]['kind'] == 'custom/notable'
+        settings.webhook_progress = True
+        dispatcher.last_progress = time.time()
+        bridge.event('s','progress')
+        await dispatcher.tick()
+        assert len(requests) == 1
+        dispatcher.last_progress = 0
+        await dispatcher.tick()
+        assert len(requests) == 2
+        assert json.loads(requests[-1].content)['summary'] == {'turn/completed':1,'progress':1}
+
+
+@pytest.mark.parametrize('kind', ['approval/required','approval/held'])
+async def test_pending_approval_never_expires_and_prioritized(bridge, settings, monkeypatch, kind):
+    settings.webhook_url = 'https://callback.example/events'; settings.webhook_secret = 's'*40
+    now = [time.time()]
+    monkeypatch.setattr('grok_codex.webhooks.time.time', lambda: now[0])
+    # Hold/required events refer to a real, unresolved request.
+    bridge.store.execute("INSERT INTO approvals(id,session_id,rpc_id,method,status,created) VALUES('pending-request','s','1','command','pending',?)", (now[0],))
+    bridge.event('s',kind,{'request_id':'pending-request'})
+    now[0] += 1000
+    requests = []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: requests.append(request) or httpx.Response(503))) as client:
+        dispatcher = Dispatcher(bridge.store,settings,client)
+        await dispatcher.tick()
+        assert len(requests) == 1
+        assert bridge.store.one('SELECT status FROM deliveries')['status'] == 'pending'
+        now[0] += 1000
+        bridge.store.execute('UPDATE deliveries SET due=0')
+        restored = Dispatcher(bridge.store,settings,client)
+        for _ in range(25): bridge.event('other','error')
+        await restored.tick()
+        assert json.loads(requests[1].content)['events'][0]['kind'] == kind
+        bridge.store.execute("UPDATE approvals SET status='resolved'")
+        restored.expire()
+        assert bridge.store.one("SELECT status FROM deliveries WHERE json_extract(payload,'$.session_id')='s'")['status'] == 'expired'
+
+
+@pytest.mark.parametrize('value', ['0','101','nan','inf'])
+def test_invalid_usage_threshold(settings, value, monkeypatch):
+    from grok_codex.config import Settings
+    monkeypatch.setenv('BRIDGE_USAGE_ALERT_PERCENT',value)
+    with pytest.raises(ValueError, match='BRIDGE_USAGE_ALERT_PERCENT'):
+        Settings(state_dir=settings.state_dir,grok_token='g'*40,human_token='h'*40).validate()
+
+
+def test_webhook_env_settings(monkeypatch):
+    from grok_codex.config import Settings, DEFAULT_WEBHOOK_EVENTS
+    monkeypatch.delenv('BRIDGE_WEBHOOK_PROGRESS', raising=False)
+    monkeypatch.delenv('BRIDGE_WEBHOOK_EVENTS', raising=False)
+    configured = Settings()
+    assert not configured.webhook_progress and configured.webhook_events == DEFAULT_WEBHOOK_EVENTS
+    monkeypatch.setenv('BRIDGE_WEBHOOK_EVENTS',' error, approval/held,error, ')
+    monkeypatch.setenv('BRIDGE_WEBHOOK_PROGRESS','1')
+    assert Settings().webhook_events == ('error','approval/held')
+    assert Settings().webhook_progress
+    monkeypatch.setenv('BRIDGE_WEBHOOK_EVENTS','')
+    assert Settings().webhook_events == ()
+    monkeypatch.setenv('BRIDGE_WEBHOOK_PROGRESS','2')
+    with pytest.raises(ValueError, match='BRIDGE_WEBHOOK_PROGRESS'):
+        Settings()
+
+
+def test_approval_bypasses_large_notable_batch_backlog(bridge,settings):
+    for _ in range(1001): bridge.event('other','error')
+    bridge.event('s','approval/required',{'request_id':'last-approval'})
+    bridge.dispatcher.batch()
+    deliveries = [json.loads(row['payload']) for row in bridge.store.all('SELECT payload FROM deliveries')]
+    assert len(deliveries) == 1000
+    assert any(payload['events'][0]['kind'] == 'approval/required' for payload in deliveries)

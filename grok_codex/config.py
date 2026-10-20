@@ -8,6 +8,21 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+DEFAULT_WEBHOOK_EVENTS = (
+    'approval/required', 'approval/held', 'turn/completed', 'turn/failed', 'error',
+    'account/authentication_required', 'account/authentication_expired',
+    'process/lost', 'job/uncertain', 'session/detached',
+    'usage/limitReached', 'usage/limitNear',
+)
+
+
+def env_flag(name: str) -> bool:
+    value = os.getenv(name, '0')
+    if value not in {'0', '1'}:
+        raise ValueError(name + ' must be 0 or 1')
+    return value == '1'
+
+
 @dataclass
 class Settings:
     state_dir: Path = field(default_factory=lambda: Path(os.getenv('BRIDGE_STATE_DIR', '~/.local/state/grok-codex')).expanduser())
@@ -20,6 +35,10 @@ class Settings:
     webhook_auth_header: str = field(default_factory=lambda: os.getenv('BRIDGE_WEBHOOK_AUTH_HEADER', ''), repr=False)
     progress_interval: float = field(default_factory=lambda: float(os.getenv('BRIDGE_PROGRESS_INTERVAL', '10')))
     webhook_max_event_age_sec: float = field(default_factory=lambda: float(os.getenv('BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC', '900')))
+    webhook_events: tuple[str, ...] = field(default_factory=lambda: tuple(dict.fromkeys(
+        part.strip() for part in os.getenv('BRIDGE_WEBHOOK_EVENTS', ','.join(DEFAULT_WEBHOOK_EVENTS)).split(',') if part.strip())))
+    webhook_progress: bool = field(default_factory=lambda: env_flag('BRIDGE_WEBHOOK_PROGRESS'))
+    usage_alert_percent: float = field(default_factory=lambda: float(os.getenv('BRIDGE_USAGE_ALERT_PERCENT', '90')))
     rpc_timeout: float = 45
     max_sessions: int = 16
     webhook_attempts: int = 10
@@ -49,7 +68,11 @@ class Settings:
             raise ValueError('Set distinct BRIDGE_GROK_TOKEN and BRIDGE_HUMAN_TOKEN (32+ characters each)')
         if not math.isfinite(self.webhook_max_event_age_sec) or self.webhook_max_event_age_sec <= 0:
             raise ValueError('BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC must be finite and positive')
-        if self.progress_interval < 0.1:
+        if any(not re.fullmatch(r'[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*', kind) for kind in self.webhook_events):
+            raise ValueError('BRIDGE_WEBHOOK_EVENTS must be comma-separated event kinds')
+        if not math.isfinite(self.usage_alert_percent) or not 0 < self.usage_alert_percent <= 100:
+            raise ValueError('BRIDGE_USAGE_ALERT_PERCENT must be in (0, 100]')
+        if not math.isfinite(self.progress_interval) or self.progress_interval < 0.1:
             raise ValueError('progress interval must be >= 0.1 seconds')
         if self.webhook_url:
             u = urlsplit(self.webhook_url)

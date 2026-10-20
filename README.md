@@ -111,8 +111,9 @@ ownership. The terminal supports:
 - `/grok` to return ownership to the bot; `/quit` to leave the terminal.
 
 In tmux, `Ctrl-b d` detaches the viewer and keeps the bridge/agent alive. Returning
-ownership and detaching are separate actions. A **detach webhook event is planned**;
-it is not emitted today.
+ownership and detaching are separate actions. Exiting the bridge terminal with
+`/quit`, `/detach`, EOF or Ctrl-C emits `session/detached` (best effort if the bridge
+is unreachable). Automatic detection of `Ctrl-b d` is still **planned**.
 
 ## Viewing sessions safely
 
@@ -158,22 +159,75 @@ only if the receiving bot relays it. Pick the bot that owns Codex work, then pas
 that routine's URL and exact Authorization header into the Mac configuration.
 Restart the daemon after configuration changes. See [BOT_INSTALL.md](BOT_INSTALL.md).
 
-Deliveries include event IDs, sequence ranges, timestamps, kinds and counts, not
-prompts, source or command output. `BRIDGE_WEBHOOK_SECRET` signs the body via HMAC;
-the routine header authenticates to the receiver and is a separate secret.
-Receivers should deduplicate event IDs and verify signatures/timestamp freshness
-where supported. Delivery retries use the same ID; there is no exactly-once claim.
+Deliveries contain event IDs, source sequence/time, kinds and safe status/usage
+metadata, not prompts, source or command output. `BRIDGE_WEBHOOK_SECRET` signs the
+body via HMAC; the routine header authenticates to the receiver and is separate.
+Deduplicate event IDs and verify signatures/timestamp freshness where supported.
+Retries keep the same event ID; delivery is at least once, not exactly once.
 
-Alert on approval pending (`approval/required`), login expired
-(`account/authentication_required`) and process disconnected (`process/lost`).
-Send a short wrap-up for a finished or failed turn (`turn/completed`, `error`).
-Ignore progress-only and stale deliveries; check current state before reporting.
-Install both the webhook alert routine and the ten-minute watchdog backup below.
+### Notable-only delivery by default
 
-`BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC` defaults to `900` (15 minutes). Startup and
-redelivery expire older queued events/deliveries; they remain in local history.
-Expired events cannot be re-alerted via webhook replay. Poll current status after
-an outage because an old but still-pending approval may have aged out of alerts.
+`BRIDGE_WEBHOOK_PROGRESS=0` stops progress-only webhooks, including queued legacy
+progress deliveries after upgrade. Routine wake-ups now correspond to configured
+notable events. Set `BRIDGE_WEBHOOK_EVENTS` to a comma-separated replacement list
+(empty disables notable events). Defaults are:
+
+```text
+approval/required,approval/held,turn/completed,turn/failed,error,
+account/authentication_required,account/authentication_expired,
+process/lost,job/uncertain,session/detached,usage/limitReached,usage/limitNear
+```
+
+The bridge emits `turn/completed` with a `status` of `completed`, `failed` or
+`interrupted` for every finished turn. `turn/failed` is an accepted filter kind
+for producers that emit it; this bridge uses the completion/status form.
+Administrative ownership changes, approval resolutions, token/output deltas and
+ordinary session activity stay in local logs without waking the bot. Notable
+events bypass the progress interval, and approval deliveries get priority.
+
+To opt back into progress batching, set `BRIDGE_WEBHOOK_PROGRESS=1`;
+`BRIDGE_PROGRESS_INTERVAL` then controls its interval (default 10 seconds).
+This can wake the routine frequently and recreate receiver backlogs. Prefer
+`codex_status`/`codex_logs` for progress and the ten-minute watchdog for backup.
+The new settings are also shown in the credential-free [.env.example](.env.example).
+
+### Usage and credits
+
+`BRIDGE_USAGE_ALERT_PERCENT` defaults to `90`. The bridge reads
+`account/rateLimits/updated.params.rateLimits`, merging sparse observations.
+`primary`/`secondary` windows use the retained protocol's `usedPercent`, `resetsAt`
+and `windowDurationMins` fields. `usage/limitNear` is recorded once per account,
+limit ID and reset window, shared across repo sessions and daemon restarts. With
+no reset timestamp, it suppresses repeat warnings for that unknown window until
+a distinct window can be identified; a percent dip alone does not rearm it.
+
+`usage/limitReached` recognizes `usageLimitExceeded`/`rateLimitExceeded`, provider
+429 error variants and explicit exhausted-usage/credits errors. Exhausted windows,
+`rateLimitReachedType` or `spendControlReached` also signal depletion. Reset times
+come from known affected windows (`resetsAt`, exported as `resets_at`), never an
+invented error field. If an error does not identify the exhausted window,
+`known_window_resets` lists observed resets without claiming which one resolves
+the error. `credits.hasCredits=false` alone does not mean exhaustion.
+Report near-limit warnings once; on exhaustion, report the reset time if known
+and ask the owner to inspect account limits. Never switch accounts or retry work
+automatically. The bridge does not estimate billing credit balances.
+
+### Expiry and unresolved approvals
+
+`BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC` defaults to `900` (15 minutes), measured from
+**source event time**, not batch, signature or retry time. Old ordinary events
+and deliveries expire; logs remain. An `approval/required` or `approval/held`
+event linked to an unresolved approval is exempt, even across dispatcher restart.
+Once resolved/stale, the normal age limit applies. The delivery attempt limit
+still applies; the watchdog covers failed/dead deliveries. An explicit event
+filter can disable approval notifications, so keep both approval kinds enabled.
+
+Routines check current state before reporting. Ignore ordinary stale/progress
+notifications, but check unresolved approval/held requests before discarding an
+old notification. Alert on approval/held with **what was held and why**: fetch
+its redacted command/reason from logs (the webhook carries only metadata). Send
+short finished/failed-turn wrap-ups and deduplicate usage/errors/incidents.
+Install both the alert routine and the independent watchdog backup below.
 
 ## Importable bot skills and backup monitoring
 
@@ -217,7 +271,11 @@ open. It accepts inspectable command/file approvals, holding requests for push,
 repository/release/PR creation or merge, recursive forced removal, privilege,
 download-to-shell pipelines, sensitive config/credentials, publication/deployment,
 expanded permission scopes and incomplete metadata. Held request IDs and reasons
-are printed once for human review via attach. File approvals require complete
+are printed once for human review via attach. The helper also records
+`approval/held` through the human-only `/sessions/hold` endpoint, once per request
+even across helper restarts; its redacted command and deny/unknown reason remain
+in local logs, and a notable webhook wakes the bot. The helper never accepts
+that held request. File approvals require complete
 paths correlated to their item; older events without metadata are held.
 
 Deny rules are conservative **heuristics, not a security boundary**. Scripts,
@@ -243,8 +301,8 @@ migration is not guaranteed; prefer an explicit summary handoff to a new thread.
 A failed webhook becomes a dead letter after the configured attempt limit.
 A tunnel outage or sleeping Mac delays delivery, and expiring notifications do
 not resolve the underlying job. Secret redaction is best effort: keep the state
-directory, logs and account homes private. No built-in web viewer or detach
-webhook event exists yet.
+directory, logs and account homes private. No built-in web viewer or automatic tmux-detach
+detection exists yet; explicit bridge-terminal exits do emit `session/detached`.
 
 ## Development
 

@@ -69,6 +69,9 @@ def test_watch_is_scoped_and_leaves_denied_pending(tmp_path):
                     'method': 'item/commandExecution/requestApproval', 'command': command,
                     'review_complete': True, 'cwd': str(tmp_path)}}
                 for aid, command in [('safe', 'pytest'), ('denied', 'git push')]]}
+        if path == '/sessions/hold':
+            assert kwargs['key'] == 'local-yolo-held-'+body['request_id']
+            return {'status':'held'}
         assert path.endswith('codex_approve')
         assert kwargs['key'] == 'local-yolo-safe'
         accepted.append(body)
@@ -151,3 +154,25 @@ def test_cli_refuses_remote_human_credentials(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 2
+
+
+def test_helper_records_held_once_before_printing(tmp_path):
+    records, messages = [], []
+    tick = [0]
+    def api(path, body, **kwargs):
+        if path.endswith('codex_status'):
+            return {'status':'idle' if tick[0] == 2 else 'approval', 'repo':str(tmp_path),
+                    'approvals':[{'id':'blocked','status':'pending'}]}
+        if path.endswith('codex_logs'):
+            return {'cursor':1, 'events':[] if body['cursor'] else [
+                {'kind':'approval/required','data':{'request_id':'blocked',
+                 'method':'item/commandExecution/requestApproval','command':'git push',
+                 'cwd':str(tmp_path),'review_complete':True}}]}
+        assert path == '/sessions/hold'
+        assert kwargs['key'] == 'local-yolo-held-blocked'
+        assert 'command' not in body
+        records.append(body)
+        return {'status':'held'}
+    watch('one-session',api=api,pause=lambda _: tick.__setitem__(0,tick[0]+1),emit=messages.append)
+    assert len(records) == 1
+    assert len([message for message in messages if 'pending_for_human' in message]) == 1

@@ -42,6 +42,9 @@ class Store:
         CREATE TABLE IF NOT EXISTS approvals(
           id TEXT PRIMARY KEY, session_id TEXT NOT NULL, rpc_id TEXT NOT NULL,
           method TEXT NOT NULL, status TEXT NOT NULL, decision TEXT, created REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS usage_state(account TEXT PRIMARY KEY, data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS usage_alerts(key TEXT PRIMARY KEY);
+        CREATE INDEX IF NOT EXISTS events_outbox ON events(batched,kind,seq);
         CREATE TABLE IF NOT EXISTS deliveries(
           id TEXT PRIMARY KEY, payload TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
           due REAL NOT NULL, status TEXT NOT NULL DEFAULT 'pending');

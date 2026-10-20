@@ -11,5 +11,6 @@ releases/
 
 _input/
 .env.*
+!.env.example
 .coverage
 htmlcov/

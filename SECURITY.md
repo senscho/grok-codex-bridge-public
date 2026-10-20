@@ -42,3 +42,9 @@ Its lexical deny list is heuristic: indirect execution and file content can hide
 side effects. It is not a sandbox or a substitute for trusted work and review.
 Chat authorization never gives the MCP connector an accept capability. Keep the
 human token on the Mac. Alert and watchdog routines never accept approvals.
+
+Webhook delivery is notable-only by default. Commands and deny reasons for
+`approval/held` stay in redacted local logs; the signed webhook includes only
+allowlisted metadata. Unresolved approval notifications are exempt from age
+expiry, but filters and delivery attempt limits still apply. Keep the scheduled
+watchdog backup and receiver deduplication enabled.

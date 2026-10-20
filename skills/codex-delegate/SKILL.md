@@ -46,6 +46,11 @@ human token or claim that setting a bot variable enables acceptance. In this
 release, the owner enables YOLO locally for one session using
 `scripts/auto-approve.sh SESSION_ID --enable-yolo`. The helper uses local human
 credentials, weakens human review, and leaves denied/unknown requests pending.
+A denied/unknown request produces `approval/held` once per request; relay its
+redacted command and reason and wait for local human review. Treat
+`usage/limitNear` as a one-window warning and `usage/limitReached` as a blocker
+with the reported reset time if known. Do not automatically retry or change
+accounts. Webhook progress is off by default; follow logs with cursors.
 Keep bridge sandbox/approval-policy defaults; YOLO does not mean unrestricted
 sandboxing. Either routine remains notification-only, regardless of session mode.
 

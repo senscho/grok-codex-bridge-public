@@ -41,7 +41,7 @@ def call(path: str, body: dict | None = None, *, human: bool = True, key: str | 
 def terminal(sid: str) -> None:
     state = call('/tools/codex_status',{'session_id':sid})
     print(f"Session {sid}\nCodex thread: {state['thread_id']}\nOwner: {state['owner']}")
-    print('Commands: /takeover /grok /status /interrupt /resume /approve ID accept|decline|cancel /steer TEXT /quit')
+    print('Commands: /takeover /grok /status /interrupt /resume /approve ID accept|decline|cancel /steer TEXT /quit /detach')
     print('Ordinary text sends a message. Takeover is explicit. Stored history follows:')
     stop = threading.Event()
 
@@ -68,7 +68,7 @@ def terminal(sid: str) -> None:
                 break
             if not text:
                 continue
-            if text=='/quit':
+            if text in {'/quit','/detach'}:
                 break
             body = {'session_id':sid}
             tool = 'codex_send'
@@ -94,6 +94,10 @@ def terminal(sid: str) -> None:
     finally:
         stop.set()
         thread.join(timeout=2)
+        try:
+            call('/sessions/detach', {'session_id':sid})
+        except Exception:
+            print('Could not record terminal detach; inspect connectivity locally.')
 
 
 def main() -> None:
@@ -113,12 +117,15 @@ def main() -> None:
     sub.add_parser('openapi')
     args = parser.parse_args()
     if args.command=='init':
+        from .config import DEFAULT_WEBHOOK_EVENTS
         args.config.parent.mkdir(parents=True,exist_ok=True)
         state = Path('~/.local/state/grok-codex').expanduser()
         values = {'BRIDGE_STATE_DIR':str(state),'BRIDGE_REPO_ROOTS':str(Path.cwd()),
                   'BRIDGE_GROK_TOKEN':secrets.token_urlsafe(32),'BRIDGE_HUMAN_TOKEN':secrets.token_urlsafe(32),
                   'BRIDGE_WEBHOOK_URL':'','BRIDGE_WEBHOOK_SECRET':secrets.token_urlsafe(32),
                   'BRIDGE_WEBHOOK_AUTH_HEADER':'','BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC':'900',
+                  'BRIDGE_WEBHOOK_PROGRESS':'0','BRIDGE_USAGE_ALERT_PERCENT':'90',
+                  'BRIDGE_WEBHOOK_EVENTS':','.join(DEFAULT_WEBHOOK_EVENTS),
                   'BRIDGE_PROGRESS_INTERVAL':'10','BRIDGE_URL':'http://127.0.0.1:48765'}
         fd = os.open(args.config,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         with os.fdopen(fd,'w') as f:

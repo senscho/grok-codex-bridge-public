@@ -54,6 +54,11 @@ class Approve(Session):
     decision: Literal['accept','decline','cancel']
 
 
+class Hold(Session):
+    request_id: str = Field(min_length=1,max_length=64)
+    reason: str = Field(min_length=1,max_length=300)
+
+
 class Switch(Session):
     account_id: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$')
 
@@ -224,6 +229,14 @@ def create_app(settings: Settings | None = None, bridge: Bridge | None = None) -
         return {'session_id':s['id'],'thread_id':s['thread_id'],'mode':'bridge-terminal',
                 'tmux_session':'grok-codex-'+s['id'], 'command':['uv','run','--locked','grok-codex','attach',s['id']],
                 'native_remote_tui':'CLI supports --remote; not enabled for managed stdio sessions because it bypasses ownership'}
+
+    @app.post('/sessions/hold',operation_id='codex_hold')
+    async def hold(body: Hold, who: Actor, key: Key = None):
+        return await mutate(who,key,'hold',body,lambda: b().hold(body.session_id,who,body.request_id,body.reason))
+
+    @app.post('/sessions/detach',operation_id='codex_detach')
+    async def detach(body: Session, who: Actor, key: Key = None):
+        return await mutate(who,key,'detach',body,lambda: b().detach(body.session_id,who))
 
     @app.post('/sessions/control',operation_id='codex_control')
     async def control(body: Control, who: Actor, key: Key = None):

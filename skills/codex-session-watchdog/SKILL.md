@@ -20,6 +20,9 @@ Do not send secrets or full transcripts.
    every historical completed turn. Follow jobs across pages with log events;
    status includes only recent jobs.
 3. Check for these conditions, using bridge timestamps and current status:
+   - `approval/held`: report a previously unreported YOLO hold immediately on this
+     check, including the redacted command/deny reason from logs. Deduplicate by
+     request ID and held phase, shared with the webhook routine. Never accept it.
    - Pending approval older than 5 minutes: alert once per request ID, including
      the local attach command. A newer approval waits for the next check.
    - Finished/failed/interrupted turn not yet reported since the watermark: send
@@ -27,6 +30,9 @@ Do not send secrets or full transcripts.
    - Starting/running/dispatching/approval session with no events for over
      20 minutes: report a possible stall, not a proven failure. For sessions
      without events, time from first observation; do not invent creation time.
+   - Unreported usage/limitNear or usage/limitReached events: report percent/reset
+     time when known, deduplicating by account/window. Do not infer available
+     credits from missing metadata, switch accounts or retry exhausted work.
    - Current failed/uncertain jobs, authentication errors, disconnected processes
      or recovery blocks: report once per incident and clear the marker on recovery.
 4. Stay silent when nothing is running and no new terminal result or unresolved
@@ -43,3 +49,8 @@ storage, flag the configuration gap once; do not promise deduplication.
 This routine observes and reports only. Never accept approvals, change ownership,
 start/resume/interrupt sessions, change YOLO mode or replay instructions. A stale
 webhook can be ignored while current unresolved state still needs this backup.
+
+Webhook progress is off by default; only `BRIDGE_WEBHOOK_EVENTS` are delivered.
+This backup still matters for receiver failures and dead letters. Ordinary
+notifications expire by source event age, but unresolved required/held approvals
+are protected. Check current state even when the originating event is old.
