@@ -1,0 +1,203 @@
+# Grok–Codex Bridge
+
+Run persistent Codex coding sessions on your Mac from a Grok Bot. The bridge keeps
+repo sessions, jobs, ownership, approvals and event delivery durable across daemon
+restarts. This is a community bridge, not an official Grok or OpenAI integration.
+
+[Visual flow](docs/flow.html) · [Mac setup](docs/setup-en.html) ·
+[Bot installation](BOT_INSTALL.md) · [Security](SECURITY.md)
+
+```text
+Grok Bot → stdio MCP connector → HTTPS tunnel /codex → bridge on Mac
+                                                        ↕
+                                              Codex app-server (stdio)
+                                              per session / repo
+                                                        ↓
+Bot routine ← signed metadata webhook ← durable event outbox
+Human terminal → attach → review /approve → takeover / return control
+```
+
+Each session has a persistent Codex thread and its own child app-server process.
+Several sessions may target a repo; avoid concurrent edits to the same files.
+SQLite records jobs, retained events and an outbox. Mutations require stable
+idempotency keys; an uncertain response never authorizes automatic prompt replay.
+Each registered account gets its own `CODEX_HOME`, including credentials/history.
+
+## Install on a Mac
+
+Install Homebrew first if needed, then:
+
+```sh
+brew install uv tmux
+brew install --cask codex
+git clone https://github.com/senscho/grok-codex-bridge-public.git
+cd grok-codex-bridge-public
+bash scripts/bootstrap.sh
+uv run --locked grok-codex register-account personal
+```
+
+Bootstrap installs locked dependencies, generates a private `.env` and runs tests.
+Run the exact `CODEX_HOME=... codex login` command printed by registration. Open
+`.env` locally; set `BRIDGE_REPO_ROOTS` to your project root (multiple roots use
+colon separators on macOS). Keep `BRIDGE_STATE_DIR` outside coding repositories.
+Run one daemon, in a terminal or a local service:
+
+```sh
+uv run --locked grok-codex daemon
+```
+
+The default listener is `127.0.0.1:48765`. CLI commands load the same `.env` from
+the current directory; use `--config /absolute/path/to/private-config` before the
+subcommand when launching elsewhere. Keep configuration permissioned `0600`.
+The demo is optional: `bash scripts/demo.sh --help`.
+
+## Tunnel and bot connection
+
+Use an HTTPS tunnel to loopback, never a public app-server listener. Options:
+
+- A stable named Cloudflare tunnel with a domain you control.
+- A temporary tunnel for testing; update the connector URL/file when it changes.
+- An authenticated private network or SSH forwarding with an HTTPS gateway.
+
+The connector defaults to `/codex`. A path-stripping proxy must translate
+`/codex/tools/...` to the bridge's `/tools/...`; a direct tunnel to the daemon
+instead needs `BRIDGE_PATH_PREFIX=""`. The [setup guide](docs/setup-en.html)
+includes a Caddy configuration for the default path. Tunnel URLs are private
+runtime configuration and never belong in this repository.
+
+Install [connectors/grok-mcp](connectors/grok-mcp/README.md) on the bot host. Set
+`CODEX_TUNNEL_URL` (or `CODEX_TUNNEL_URL_FILE`), `BRIDGE_PATH_PREFIX`,
+`CODEX_ALLOWED_ROOT` and the `BRIDGE_GROK_TOKEN` secret. The root is the Mac path;
+the bridge separately enforces canonical paths under `BRIDGE_REPO_ROOTS`.
+
+## Tokens and approvals
+
+`init` creates two distinct random bearer tokens. The **HUMAN token stays on the
+Mac and is never given to bots**. Only the **Grok token** goes to the bot's secret
+store. It permits coding requests and logs, not accepting approvals, registering
+accounts or taking human ownership. Do not share your whole `.env`.
+
+The defaults are `workspace-write`, `on-request` and the human approval reviewer.
+The API accepts only `workspace-write`/`read-only` and `on-request`/`untrusted`;
+it offers no unrestricted sandbox or automatic-approval mode. A bot can decline
+or cancel a pending approval. A human accepts it explicitly in the local terminal.
+Human approval applies to operations Codex flags; it is not a promise to ask
+before every edit or every permitted command.
+
+## Work, attach and take over
+
+Have the bot call `codex_start` once for a repo/task, then `codex_send` for
+follow-ups. Save session/job IDs and poll `codex_status`/`codex_logs`. Supply a
+stable idempotency key for mutations and reuse it after a lost response.
+
+On the Mac:
+
+```sh
+uv run --locked grok-codex list
+uv run --locked grok-codex attach SESSION_ID
+# Without tmux:
+uv run --locked grok-codex terminal SESSION_ID
+```
+
+Attach watches retained/live bridge events. It does not automatically take
+ownership. The terminal supports:
+
+- `/status`, `/interrupt`, `/resume` to inspect or manage the current session.
+- `/approve REQUEST_ID accept` (or `decline` / `cancel`) after reviewing the request.
+- `/takeover` for explicit human ownership; ordinary text sends follow-ups.
+- `/steer TEXT` to steer an active turn; ordinary sends reject busy sessions.
+- `/grok` to return ownership to the bot; `/quit` to leave the terminal.
+
+In tmux, `Ctrl-b d` detaches the viewer and keeps the bridge/agent alive. Returning
+ownership and detaching are separate actions. A **detach webhook event is planned**;
+it is not emitted today.
+
+## Viewing sessions safely
+
+Use `codex resume THREAD_ID` with the **same `CODEX_HOME`** as that session's
+registered account. Get the thread ID from bridge status and the home from local
+account registration/listing. Example:
+
+```sh
+CODEX_HOME=/path/to/registered/account codex resume THREAD_ID
+```
+
+Verified behavior: Codex's built-in protection opens a thread currently held by
+the bridge's app-server as **READ-ONLY** (“opened elsewhere”). Parallel viewing
+is safe under that protection. Keep bridge attach as the approval/control surface;
+other Codex versions or transports may behave differently.
+
+For a tmux live view, configure a large history limit **before creating the
+session/window**, since existing pane history is not enlarged retroactively:
+
+```sh
+# Add this to ~/.tmux.conf before creating the viewer window:
+set-option -g history-limit 100000
+```
+
+After creating the bridge attach window, resize it to the viewer's columns/rows:
+
+```sh
+tmux resize-window -t grok-codex-SESSION_ID -x C -y R
+tmux capture-pane -t grok-codex-SESSION_ID -p -e -J -S - -E -
+```
+
+Replace `C`/`R` with numeric dimensions. tmux renders at its own window size;
+resizing only the viewer does not reflow tmux output. The capture preserves ANSI
+colors (`-e`), joins wrapped lines (`-J`) and includes all retained history. Treat
+captures as private logs. A built-in web session viewer is **planned**. The current
+`/dashboard` is only an authenticated metadata table, not a live transcript viewer.
+
+## Webhooks and the receiving bot
+
+Set `BRIDGE_WEBHOOK_URL` and `BRIDGE_WEBHOOK_AUTH_HEADER` in the **Mac's** `.env`
+to **one bot's webhook routine**. Only that bot wakes. Other bots learn about work
+only if the receiving bot relays it. Pick the bot that owns Codex work, then paste
+that routine's URL and exact Authorization header into the Mac configuration.
+Restart the daemon after configuration changes. See [BOT_INSTALL.md](BOT_INSTALL.md).
+
+Deliveries include event IDs, sequence ranges, timestamps, kinds and counts, not
+prompts, source or command output. `BRIDGE_WEBHOOK_SECRET` signs the body via HMAC;
+the routine header authenticates to the receiver and is a separate secret.
+Receivers should deduplicate event IDs and verify signatures/timestamp freshness
+where supported. Delivery retries use the same ID; there is no exactly-once claim.
+
+Only approval pending (`approval/required`), login expired
+(`account/authentication_required`) and process disconnected (`process/lost`)
+need human alerts. The bridge also delivers progress and other urgent metadata;
+the receiving routine filters these, polls state and avoids noisy notifications.
+
+`BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC` defaults to `900` (15 minutes). Startup and
+redelivery expire older queued events/deliveries; they remain in local history.
+Expired events cannot be re-alerted via webhook replay. Poll current status after
+an outage because an old but still-pending approval may have aged out of alerts.
+
+## Restart behavior and known issues
+
+Idle materialized sessions return after restart. An in-flight turn becomes
+interrupted/uncertain; its prompt is **not replayed**. Inspect work before giving
+new instructions. Pending in-memory approvals become stale after process loss.
+`recovery_blocked` means a recorded process still exists; inspect it locally.
+The bridge deliberately avoids killing a possibly reused PID.
+
+The retained protocol contract targets Codex CLI 0.163.0. Some full-history APIs
+were unsupported there; bridge attach uses its retained event log and metadata-only
+resume. Native read-only viewing was verified separately. Cross-account history
+migration is not guaranteed; prefer an explicit summary handoff to a new thread.
+A failed webhook becomes a dead letter after the configured attempt limit.
+A tunnel outage or sleeping Mac delays delivery, and expiring notifications do
+not resolve the underlying job. Secret redaction is best effort: keep the state
+directory, logs and account homes private. No built-in web viewer or detach
+webhook event exists yet.
+
+## Development
+
+```sh
+uv run --locked pytest -q
+# Optional, isolated unauthenticated installed-binary test:
+RUN_CODEX_INTEGRATION=1 uv run --locked pytest -q -m integration
+uv run --locked python scripts/export_contracts.py
+```
+
+See [test scope](docs/TESTING.md), [protocol decisions](docs/ADR-001.md),
+[SECURITY.md](SECURITY.md) and [MIT license](LICENSE).

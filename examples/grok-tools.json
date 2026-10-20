@@ -1,0 +1,346 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_start",
+      "description": "Start. Adapter: POST /tools/codex_start with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Repo"
+          },
+          "account": {
+            "type": "string",
+            "maxLength": 48,
+            "minLength": 1,
+            "title": "Account"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Prompt"
+          },
+          "options": {
+            "properties": {
+              "sandbox": {
+                "type": "string",
+                "enum": [
+                  "workspace-write",
+                  "read-only"
+                ],
+                "title": "Sandbox",
+                "default": "workspace-write"
+              },
+              "approval_policy": {
+                "type": "string",
+                "enum": [
+                  "on-request",
+                  "untrusted"
+                ],
+                "title": "Approval Policy",
+                "default": "on-request"
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Model"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "title": "Options"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repo",
+          "account",
+          "prompt"
+        ],
+        "title": "Start"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_send",
+      "description": "Send. Adapter: POST /tools/codex_send with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "steer": {
+            "type": "boolean",
+            "title": "Steer",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id",
+          "message"
+        ],
+        "title": "Send"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_status",
+      "description": "Status. Adapter: POST /tools/codex_status with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "Session"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_logs",
+      "description": "Logs. Adapter: POST /tools/codex_logs with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Cursor",
+            "default": 0
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 100
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "Logs"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_list",
+      "description": "Listing. Adapter: POST /tools/codex_list with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_accounts",
+      "description": "Accounts. Adapter: POST /tools/codex_accounts with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_approve",
+      "description": "Approve. Adapter: POST /tools/codex_approve with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Request Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "decline",
+              "cancel"
+            ],
+            "title": "Decision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id",
+          "request_id",
+          "decision"
+        ],
+        "title": "Approve"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_interrupt",
+      "description": "Interrupt. Adapter: POST /tools/codex_interrupt with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "Session"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_resume",
+      "description": "Resume. Adapter: POST /tools/codex_resume with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "Session"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_stop",
+      "description": "Stop. Adapter: POST /tools/codex_stop with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "Session"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_switch_account",
+      "description": "Switch. Adapter: POST /tools/codex_switch_account with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          },
+          "account_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$",
+            "title": "Account Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id",
+          "account_id"
+        ],
+        "title": "Switch"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "codex_attach_info",
+      "description": "Attach Info. Adapter: POST /tools/codex_attach_info with bearer token; mutations require a stable Idempotency-Key.",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$",
+            "title": "Session Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "Session"
+      }
+    }
+  }
+]

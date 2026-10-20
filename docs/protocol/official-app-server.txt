@@ -1,0 +1,21 @@
+Codex app-server reference
+
+The private source included a downloaded web-page snapshot here. The public
+release replaces that page's HTML, scripts and example identifiers with this
+short reference. For the protocol contract used by this bridge, consult the
+retained generated schemas and upstream-app-server.md in this directory.
+
+Official documentation: https://developers.openai.com/codex/app-server
+Recorded source target: Codex CLI 0.163.0.
+
+Transport: private newline-delimited JSON-RPC over child-process stdio.
+Initialization: initialize, then initialized notification.
+Threads: thread/start with ephemeral=false; persist thread ID for thread/resume.
+Turns: turn/start, turn/steer with expectedTurnId, turn/interrupt.
+Approvals: respond to item/commandExecution/requestApproval and
+item/fileChange/requestApproval using their original request IDs.
+History: metadata-only reads and excludeTurns resume are used by this bridge
+because full history APIs were unsupported in the recorded installation.
+
+This is a project reference summary, not a complete protocol specification or a
+claim that newer Codex versions retain the same interface.

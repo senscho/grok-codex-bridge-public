@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.env
+.bridge/
+*.sqlite*
+*.log
+.DS_Store
+releases/
+
+_input/
+.env.*
+.coverage
+htmlcov/

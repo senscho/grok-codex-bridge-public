@@ -1,0 +1,11 @@
+{
+  "event_id": "EXAMPLE-ID",
+  "session_id": "EXAMPLE-ID",
+  "timestamp": 1792464639.0,
+  "from_seq": 42,
+  "to_seq": 42,
+  "events": [
+    {"id": "EXAMPLE-ID", "seq": 42, "kind": "approval/required", "time": 1792464639.0}
+  ],
+  "summary": {"approval/required": 1}
+}

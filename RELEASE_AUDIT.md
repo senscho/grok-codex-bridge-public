@@ -1,0 +1,139 @@
+# Public release audit
+
+This release copies only source working-tree application, test, script, example,
+protocol and build files. Source Git metadata, credentials, runtime configuration,
+account homes, databases, logs, caches and environments were not copied. The
+input connector is excluded from Git. No remotes were added and nothing was pushed.
+
+## Changes from the private source
+
+- Replaced the private README with public installation, architecture, token,
+  ownership, approval, tunnel, viewing, restart and known-issue documentation.
+- Dropped the Korean setup page. Added the English setup/flow pages and rewrote
+  the Mac tutorial around the public repository URL.
+- Translated demo output and corresponding assertions. Replaced example session,
+  event and attachment identifiers with placeholders in documentation/examples.
+- Replaced the downloaded official documentation web snapshot with a concise
+  reference summary; retained protocol schemas, upstream reference and CLI help (with trailing
+  whitespace normalized).
+- Added an environment-configured MCP connector with a Mac-root guard, explicit
+  URL-file support, safer HTTP settings and mutation keys retained on failures.
+- Added bot installation/routine instructions, security guidance and MIT licensing.
+- Added configurable webhook notification expiry at dispatcher startup, batching
+  and retry, including legacy persisted outboxes and replay. Local history stays.
+  Default expiry is 900 seconds. Added expiry and connector regression tests.
+- Extended generated local configuration with webhook auth and expiry settings;
+  extended Git exclusions for private configuration and the supplied input.
+
+## Validation
+
+- `uv run --locked pytest -q`: **87 passed, 1 skipped**. The skipped check is the
+  opt-in installed-Codex lifecycle integration test; no authenticated coding run
+  or live bot webhook was performed for this release.
+- Real MCP runtime smoke check: all **11 tools** registered successfully.
+- Contract export: OpenAPI and **12** direct bridge function definitions generated;
+  both match the inherited contracts (the MCP adapter exposes a smaller surface).
+- Application, examples and connector compile successfully.
+- All retained JSON files parse. HTML local links resolve; the flow page has no
+  external assets. Desktop flow layout was rendered and visually inspected in
+  headless Chrome; responsive and light/dark styles are inline.
+
+## Privacy sweep
+
+The requested case-insensitive expression, a UUID expression and the full Unicode
+Hangul property were run with hidden files enabled, excluding Git metadata and
+input. Git ignores also exclude generated environments/caches; the release file
+set below was checked. There are **13 remaining matching lines**, all intentional
+code/protocol text, listed individually here. There are **zero UUID matches** and
+**zero Hangul matches**. No personal names, home paths, private hostnames, tunnel
+addresses, personal emails or real credentials were found. Generic loopback
+addresses and reserved example domains remain for runnable examples/tests.
+
+| File | Line | Classification |
+|---|---:|---|
+| `docs/protocol/app-server-help.txt` | 18 | Upstream CLI help flag or sandbox option; substring false positive. |
+| `docs/protocol/cli-help.txt` | 49 | Upstream CLI help flag or sandbox option; substring false positive. |
+| `docs/protocol/cli-help.txt` | 112 | Upstream CLI help flag or sandbox option; substring false positive. |
+| `docs/protocol/resume-help.txt` | 19 | Upstream CLI help flag or sandbox option; substring false positive. |
+| `docs/protocol/resume-help.txt` | 91 | Upstream CLI help flag or sandbox option; substring false positive. |
+| `docs/protocol/schema/ClientRequest.json` | 82 | Protocol description of a risk assessment framework; substring false positive. |
+| `docs/protocol/schema/ServerNotification.json` | 468 | Protocol description of a risk assessment framework; substring false positive. |
+| `docs/protocol/schema/v2-ThreadResumeParams.json` | 53 | Protocol description of a risk assessment framework; substring false positive. |
+| `docs/protocol/schema/v2-ThreadResumeResponse.json` | 38 | Protocol description of a risk assessment framework; substring false positive. |
+| `docs/protocol/schema/v2-ThreadStartParams.json` | 9 | Protocol description of a risk assessment framework; substring false positive. |
+| `docs/protocol/schema/v2-TurnStartParams.json` | 31 | Protocol description of a risk assessment framework; substring false positive. |
+| `grok_codex/service.py` | 24 | Intentional secret-redaction regular expression. |
+| `grok_codex/service.py` | 26 | Intentional secret-redaction regular expression. |
+
+## Complete release file list
+
+68 files; this audit is included.
+
+- `.gitignore`
+- `.python-version`
+- `BOT_INSTALL.md`
+- `LICENSE`
+- `README.md`
+- `RELEASE_AUDIT.md`
+- `SECURITY.md`
+- `connectors/grok-mcp/README.md`
+- `connectors/grok-mcp/requirements.txt`
+- `connectors/grok-mcp/server.py`
+- `docs/ADR-001.md`
+- `docs/TESTING.md`
+- `docs/flow.html`
+- `docs/mac-tutorial.html`
+- `docs/openapi.json`
+- `docs/protocol/app-server-help.txt`
+- `docs/protocol/cli-help.txt`
+- `docs/protocol/official-app-server.txt`
+- `docs/protocol/resume-help.txt`
+- `docs/protocol/schema/ClientRequest.json`
+- `docs/protocol/schema/CommandExecutionRequestApprovalParams.json`
+- `docs/protocol/schema/CommandExecutionRequestApprovalResponse.json`
+- `docs/protocol/schema/FileChangeRequestApprovalParams.json`
+- `docs/protocol/schema/FileChangeRequestApprovalResponse.json`
+- `docs/protocol/schema/ServerNotification.json`
+- `docs/protocol/schema/ServerRequest.json`
+- `docs/protocol/schema/v1-InitializeParams.json`
+- `docs/protocol/schema/v2-ThreadItemsListParams.json`
+- `docs/protocol/schema/v2-ThreadReadParams.json`
+- `docs/protocol/schema/v2-ThreadResumeParams.json`
+- `docs/protocol/schema/v2-ThreadResumeResponse.json`
+- `docs/protocol/schema/v2-ThreadStartParams.json`
+- `docs/protocol/schema/v2-ThreadTurnsListParams.json`
+- `docs/protocol/schema/v2-TurnInterruptParams.json`
+- `docs/protocol/schema/v2-TurnStartParams.json`
+- `docs/protocol/schema/v2-TurnSteerParams.json`
+- `docs/protocol/upstream-app-server.md`
+- `docs/setup-en.html`
+- `examples/grok-tools.json`
+- `examples/webhook.json`
+- `examples/webhook_receiver.py`
+- `grok_codex/__init__.py`
+- `grok_codex/api.py`
+- `grok_codex/cli.py`
+- `grok_codex/config.py`
+- `grok_codex/demo.py`
+- `grok_codex/protocol.py`
+- `grok_codex/service.py`
+- `grok_codex/store.py`
+- `grok_codex/webhooks.py`
+- `pyproject.toml`
+- `scripts/bootstrap.sh`
+- `scripts/demo.sh`
+- `scripts/export_contracts.py`
+- `tests/__init__.py`
+- `tests/conftest.py`
+- `tests/fakes.py`
+- `tests/stdio_fixture.py`
+- `tests/test_api.py`
+- `tests/test_approvals.py`
+- `tests/test_connector.py`
+- `tests/test_demo.py`
+- `tests/test_integration.py`
+- `tests/test_protocol.py`
+- `tests/test_sessions.py`
+- `tests/test_vertical.py`
+- `tests/test_webhooks.py`
+- `uv.lock`
