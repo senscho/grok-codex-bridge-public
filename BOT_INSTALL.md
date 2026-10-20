@@ -141,11 +141,29 @@ presence only, e.g. `[ -n "${BRIDGE_GROK_TOKEN:-}" ] && echo present`).
 
 ## Stage 3: Run the daemon (launchd)
 
-`render_launchd.sh` only prints a plist; it changes nothing. Install it as a
-per-user LaunchAgent (no `sudo`):
+`render_launchd.sh` only prints a plist; it changes nothing. The kind is
+`bridge` (`daemon` is accepted as an alias) or `caddy`. Pass `--repo` with the
+bridge checkout so `--project`, `--config` (`.env`) and `WorkingDirectory` point
+at it; without it the script uses the checkout it lives in, which is wrong if you
+run it from a scratch clone. The plist sets `Umask` 077 so state and log files
+are private.
+
+**Check for an existing bridge LaunchAgent first.** If one is already installed
+under any label (an older or hand-made plist), do not install a second one: two
+daemons would fight over port 48765. Check:
 
 ```sh
-cd ~/grok-codex-bridge-public && mkdir -p ~/Library/LaunchAgents ~/Library/Logs/grok-codex && bash scripts/render_launchd.sh bridge > ~/Library/LaunchAgents/com.grok-codex-bridge.daemon.plist && plutil -lint ~/Library/LaunchAgents/com.grok-codex-bridge.daemon.plist && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grok-codex-bridge.daemon.plist
+launchctl list | grep -i codex; ls ~/Library/LaunchAgents | grep -i -e codex -e bridge
+```
+
+If something shows up, **ASK THE USER** whether to keep it (skip this stage and
+verify with the health check below) or remove it first (`launchctl bootout
+gui/$(id -u)/LABEL`, then move its plist out of `~/Library/LaunchAgents`). Never
+remove another LaunchAgent on your own. Otherwise install it as a per-user
+LaunchAgent (no `sudo`):
+
+```sh
+cd ~/grok-codex-bridge-public && mkdir -p ~/Library/LaunchAgents ~/Library/Logs/grok-codex && bash scripts/render_launchd.sh bridge --repo "$PWD" > ~/Library/LaunchAgents/com.grok-codex-bridge.daemon.plist && plutil -lint ~/Library/LaunchAgents/com.grok-codex-bridge.daemon.plist && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grok-codex-bridge.daemon.plist
 ```
 
 Restart after any `.env` change: `launchctl kickstart -k gui/$(id -u)/com.grok-codex-bridge.daemon`.
@@ -192,7 +210,7 @@ Never expose the Codex app-server or bind the bridge to a non-loopback address.
 (`127.0.0.1:48766/codex/*` → `127.0.0.1:48765/*`):
 
 ```sh
-cd ~/grok-codex-bridge-public && bash scripts/render_launchd.sh caddy > ~/Library/LaunchAgents/com.grok-codex-bridge.caddy.plist && plutil -lint ~/Library/LaunchAgents/com.grok-codex-bridge.caddy.plist && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grok-codex-bridge.caddy.plist
+cd ~/grok-codex-bridge-public && bash scripts/render_launchd.sh caddy --repo "$PWD" > ~/Library/LaunchAgents/com.grok-codex-bridge.caddy.plist && plutil -lint ~/Library/LaunchAgents/com.grok-codex-bridge.caddy.plist && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.grok-codex-bridge.caddy.plist
 sleep 3; curl -fsS http://127.0.0.1:48766/codex/healthz
 ```
 

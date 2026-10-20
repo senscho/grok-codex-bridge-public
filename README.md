@@ -44,7 +44,8 @@ Run the exact `CODEX_HOME=... codex login` command printed by registration. Open
 `.env` locally; set `BRIDGE_REPO_ROOTS` to your project root (multiple roots use
 colon separators on macOS). Keep `BRIDGE_STATE_DIR` outside coding repositories.
 Run one daemon, in a terminal or as a LaunchAgent
-(`bash scripts/render_launchd.sh bridge` prints the plist; see BOT_INSTALL stage 3):
+(`bash scripts/render_launchd.sh bridge --repo "$PWD"` prints the plist; install only
+one bridge LaunchAgent, see BOT_INSTALL stage 3):
 
 ```sh
 uv run --locked grok-codex daemon
