@@ -1,0 +1,8 @@
+# Local path-stripping proxy: tunnel -> 127.0.0.1:48766/codex/* -> bridge 127.0.0.1:48765/*
+# Matches the connector default BRIDGE_PATH_PREFIX=/codex. Loopback only.
+http://127.0.0.1:48766 {
+	handle_path /codex/* {
+		reverse_proxy 127.0.0.1:48765
+	}
+	respond 404
+}

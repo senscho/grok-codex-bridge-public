@@ -1,7 +1,13 @@
 # Grok MCP connector
 
 A stdio MCP server forwarding eleven tools to a bridge you operate. Python 3.12+
-is required. Install in an isolated environment:
+is required. With uv, `server.py` carries inline dependencies, so the launcher can be:
+
+```sh
+uv run --quiet --script /absolute/path/to/connectors/grok-mcp/server.py
+```
+
+Or install in an isolated environment:
 
 ```sh
 python3 -m venv .venv
@@ -39,4 +45,5 @@ until coding completes. The `personal` default account is a generic local accoun
 label, not an identity or a credential.
 
 Never configure the human token in this process. See [BOT_INSTALL.md](../../BOT_INSTALL.md)
-for the webhook routine and the distinction between the receiving bot and relays.
+for the full install runbook, the webhook routine and the receiving bot.
+`bash scripts/check_box.sh --url-file FILE` checks this host and the tunnel without printing secrets.

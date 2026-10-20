@@ -27,6 +27,9 @@ Nonpositive and nonfinite expiry configuration is rejected.
 Other useful checks:
 
 ```sh
+shellcheck -s bash scripts/*.sh
+bash scripts/check_prereqs.sh   # Mac, read-only
+bash scripts/check_box.sh       # bot host, read-only
 uv run --locked python scripts/export_contracts.py
 uv run --locked python -m compileall -q grok_codex examples connectors
 ```

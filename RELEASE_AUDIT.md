@@ -239,3 +239,13 @@ addresses and reserved example domains remain for runnable examples/tests.
 - `tests/test_vertical.py`
 - `tests/test_webhooks.py`
 - `uv.lock`
+
+## Follow-up: bot install hardening
+
+Rewrote BOT_INSTALL.md as an ordered runbook with a verify step per stage and
+explicit user stop points. Added read-only `scripts/check_prereqs.sh` (Mac, bash
+3.2 compatible) and `scripts/check_box.sh` (bot host); both print PASS/FAIL/WARN
+lines and never print token, webhook or tunnel values. Added
+`scripts/render_launchd.sh` (prints a per-user LaunchAgent plist, writes nothing),
+`examples/Caddyfile` and inline uv script metadata for the connector. No runtime
+behavior changed; approvals remain human-only.

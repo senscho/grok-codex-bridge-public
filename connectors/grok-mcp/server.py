@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["httpx>=0.27,<1", "mcp>=1.12,<2"]
+# ///
 # MCP adapter for the public Grok–Codex bridge.
 import os
 import uuid

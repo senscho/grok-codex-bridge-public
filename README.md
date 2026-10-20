@@ -1,3 +1,5 @@
+> **Grok Bot / AI agents: follow [BOT_INSTALL.md](BOT_INSTALL.md).**
+
 # Grok–Codex Bridge
 
 Run persistent Codex coding sessions on your Mac from a Grok Bot. The bridge keeps
@@ -25,7 +27,8 @@ Each registered account gets its own `CODEX_HOME`, including credentials/history
 
 ## Install on a Mac
 
-Install Homebrew first if needed, then:
+Install Homebrew first if needed. `bash scripts/check_prereqs.sh` (read-only)
+reports what is missing. Then:
 
 ```sh
 brew install uv tmux
@@ -40,7 +43,8 @@ Bootstrap installs locked dependencies, generates a private `.env` and runs test
 Run the exact `CODEX_HOME=... codex login` command printed by registration. Open
 `.env` locally; set `BRIDGE_REPO_ROOTS` to your project root (multiple roots use
 colon separators on macOS). Keep `BRIDGE_STATE_DIR` outside coding repositories.
-Run one daemon, in a terminal or a local service:
+Run one daemon, in a terminal or as a LaunchAgent
+(`bash scripts/render_launchd.sh bridge` prints the plist; see BOT_INSTALL stage 3):
 
 ```sh
 uv run --locked grok-codex daemon
@@ -62,7 +66,7 @@ Use an HTTPS tunnel to loopback, never a public app-server listener. Options:
 The connector defaults to `/codex`. A path-stripping proxy must translate
 `/codex/tools/...` to the bridge's `/tools/...`; a direct tunnel to the daemon
 instead needs `BRIDGE_PATH_PREFIX=""`. The [setup guide](docs/setup-en.html)
-includes a Caddy configuration for the default path. Tunnel URLs are private
+and [examples/Caddyfile](examples/Caddyfile) provide a Caddy configuration for the default path. Tunnel URLs are private
 runtime configuration and never belong in this repository.
 
 Install [connectors/grok-mcp](connectors/grok-mcp/README.md) on the bot host. Set
