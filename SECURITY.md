@@ -34,3 +34,11 @@ processes that load them, and revoke a leaked tunnel endpoint. Avoid posting liv
 secrets, logs or databases in issues. Report vulnerabilities through a private
 GitHub security advisory on the public repository when available; otherwise ask
 for a private reporting channel without disclosing exploit details publicly.
+
+The optional `scripts/auto-approve.sh` helper weakens the default human-approval
+guarantee. The owner enables it locally for exactly one session until idle. It
+uses human credentials locally and leaves denied/incomplete requests pending.
+Its lexical deny list is heuristic: indirect execution and file content can hide
+side effects. It is not a sandbox or a substitute for trusted work and review.
+Chat authorization never gives the MCP connector an accept capability. Keep the
+human token on the Mac. Alert and watchdog routines never accept approvals.

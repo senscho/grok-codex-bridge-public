@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 
@@ -56,7 +57,7 @@ async def test_path_traversal_symlink_and_state_overlap(client,settings):
     outside=settings.state_dir.parent/'outside'; outside.mkdir()
     link=settings.repo_roots[0]/'link'; link.symlink_to(outside,target_is_directory=True)
     for repo in [outside,link,settings.repo_roots[0]/'..']:
-        r=await client.post('/tools/codex_start',json={'repo':str(repo),'account':'one','prompt':'x'},headers=headers(settings,key=str(repo)))
+        r=await client.post('/tools/codex_start',json={'repo':str(repo),'account':'one','prompt':'x'},headers=headers(settings,key=hashlib.sha256(str(repo).encode()).hexdigest()))
         assert r.status_code==400
     settings.repo_roots=(settings.state_dir.parent,)
     with pytest.raises(ValueError,match='overlap'):

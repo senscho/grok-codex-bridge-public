@@ -25,18 +25,47 @@ input connector is excluded from Git. No remotes were added and nothing was push
 - Extended generated local configuration with webhook auth and expiry settings;
   extended Git exclusions for private configuration and the supplied input.
 
+## Follow-up: skills, backup routines and local YOLO
+
+Added three importable skill folders: delegation, webhook alerts and a ten-minute
+watchdog backup. Templates specify trigger setup, saved cursors, a shared private
+deduplication ledger, session-scoped chat consent and no routine acceptance.
+They are importable templates; live bot triggers/storage are not provisioned by
+this repository change. The connector still has no approval-accept tool.
+
+Added an executable shell launcher and Python implementation for the owner's
+optional one-session local YOLO helper. It polls structured events, keeps human
+credentials on loopback, accepts inspectable command/file requests and leaves
+denied or incomplete requests pending, ignoring stale requests. Its deny rules are heuristic, not
+a security boundary. It exits on idle/inactive state, Ctrl-C or API failure.
+Added redacted command working-directory/completeness, permission-scope and file
+item/path completeness metadata so the helper can make conservative decisions.
+Default server-side authorization and bot approval restrictions are unchanged.
+
+Updated the README, bot installation, security, English Mac guides, visual flow
+and test scope. Added helper regressions and fixed an inherited path-validation
+test whose temporary-path idempotency key could exceed the API length limit.
+The test now hashes that key so it continues to exercise path validation.
+
 ## Validation
 
-- `uv run --locked pytest -q`: **87 passed, 1 skipped**. The skipped check is the
+- `uv run --locked pytest -q`: **130 passed, 1 skipped**. The skipped check is the
   opt-in installed-Codex lifecycle integration test; no authenticated coding run
   or live bot webhook was performed for this release.
-- Real MCP runtime smoke check: all **11 tools** registered successfully.
+- Unchanged connector: initial-release real MCP runtime smoke check registered
+  all **11 tools** successfully.
 - Contract export: OpenAPI and **12** direct bridge function definitions generated;
   both match the inherited contracts (the MCP adapter exposes a smaller surface).
-- Application, examples and connector compile successfully.
+- Application (including the helper), examples and connector compile successfully.
+- All three new skills pass the skill-creator frontmatter/content validator.
+- The helper shell launcher passes `bash -n`; its CLI help and explicit opt-in /
+  loopback-only credential checks are validated. Helper tests cover command deny
+  rules, file checks/symlinks, metadata redaction, per-session scope, stale/held
+  requests, idle exit and API failure. No live approvals were accepted in testing.
 - All retained JSON files parse. HTML local links resolve; the flow page has no
-  external assets. Desktop flow layout was rendered and visually inspected in
-  headless Chrome; responsive and light/dark styles are inline.
+  external assets. The initial desktop flow layout was rendered and visually inspected in
+  headless Chrome; the follow-up section uses the existing styles. Responsive
+  and light/dark styles are inline. Updated HTML links/assets were checked.
 
 ## Privacy sweep
 
@@ -67,7 +96,7 @@ addresses and reserved example domains remain for runnable examples/tests.
 
 ## Complete release file list
 
-68 files; this audit is included.
+74 files; this audit is included.
 
 - `.gitignore`
 - `.python-version`
@@ -112,6 +141,7 @@ addresses and reserved example domains remain for runnable examples/tests.
 - `examples/webhook_receiver.py`
 - `grok_codex/__init__.py`
 - `grok_codex/api.py`
+- `grok_codex/auto_approve.py`
 - `grok_codex/cli.py`
 - `grok_codex/config.py`
 - `grok_codex/demo.py`
@@ -120,15 +150,20 @@ addresses and reserved example domains remain for runnable examples/tests.
 - `grok_codex/store.py`
 - `grok_codex/webhooks.py`
 - `pyproject.toml`
+- `scripts/auto-approve.sh`
 - `scripts/bootstrap.sh`
 - `scripts/demo.sh`
 - `scripts/export_contracts.py`
+- `skills/codex-approval-alert/SKILL.md`
+- `skills/codex-delegate/SKILL.md`
+- `skills/codex-session-watchdog/SKILL.md`
 - `tests/__init__.py`
 - `tests/conftest.py`
 - `tests/fakes.py`
 - `tests/stdio_fixture.py`
 - `tests/test_api.py`
 - `tests/test_approvals.py`
+- `tests/test_auto_approve.py`
 - `tests/test_connector.py`
 - `tests/test_demo.py`
 - `tests/test_integration.py`

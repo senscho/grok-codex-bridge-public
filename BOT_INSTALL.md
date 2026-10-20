@@ -18,7 +18,8 @@ another bot without access to that bot's environment.
    inject it into the MCP process environment. Never print it, embed it in prompts,
    or ask for `BRIDGE_HUMAN_TOKEN`. Restart the MCP server after changing launcher
    variables. URL-file contents are reread on each call.
-4. Create a webhook-triggered routine **on the bot that owns Codex work** using
+4. Import the three [bot skills](#skills-and-backup-monitoring) and create a
+   webhook-triggered alert routine **on the bot that owns Codex work** using
    the bot platform's routine management interface. Configure the routine to
    accept bridge JSON metadata, deduplicate `event_id`, examine `events` and
    `summary`, and fetch current state using `codex_status`/`codex_logs`.
@@ -50,17 +51,18 @@ Suggested routine behavior:
 
 ```text
 Deduplicate event_id. Fetch current session state.
-Alert the human only for approval/required, account/authentication_required,
-or process/lost (approval pending, login expired, process disconnected).
+Alert for approval/required, account/authentication_required, or process/lost
+(approval pending, login expired, process disconnected).
+Send a short wrap-up for turn/completed or current failed turns/errors.
 Ignore resolved/stale conditions after checking current state.
-For progress/completion, update internal task state quietly; relay only as needed.
+Ignore progress-only deliveries and delivery bodies older than 15 minutes.
 Never accept an approval or request the human token.
 Never automatically resend interrupted/uncertain work.
 ```
 
-The bridge's internal `urgent` classification also covers completion and other
-state changes. Filter for the three conditions above; “urgent delivery” is not
-itself a reason to alert a human. Approval decisions happen on the Mac via
+The bridge's internal `urgent` classification covers several state changes.
+Use the alert template to classify them; “urgent delivery” alone is not a reason
+to alert a human. Approval decisions happen on the Mac via
 `grok-codex attach SESSION_ID` and `/approve REQUEST_ID accept|decline|cancel`.
 
 Notifications older than `BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC` (default 15 minutes)
@@ -68,3 +70,37 @@ expire before delivery/retry, including across restart. Poll status after a long
 outage. Idle sessions can resume automatically; in-flight turns are interrupted
 and never automatically replayed. A web viewer and detach webhook event are
 **planned**, so do not build routine logic that expects either today.
+
+## Skills and backup monitoring
+
+Import each folder into your bot's skill library:
+
+- [codex-delegate](skills/codex-delegate/SKILL.md)
+- [codex-approval-alert](skills/codex-approval-alert/SKILL.md)
+- [codex-session-watchdog](skills/codex-session-watchdog/SKILL.md)
+
+Use the alert skill as the webhook routine body. Also create a scheduled routine
+**every 10 minutes** with the watchdog body, on the same owning bot. Webhooks can
+fail or expire; the watchdog independently lists sessions and polls status/logs.
+It alerts once for approvals older than 5 minutes, unreported finished turns,
+active sessions without events for over 20 minutes and current errors. It remains
+silent when there is nothing new to report. Baseline historical completions on
+first installation.
+
+Give both routines and the delegating bot the same private durable report ledger:
+per-session cursors, reported terminal job/turn IDs, active incident fingerprints
+and processed webhook IDs. Atomically claim each report before sending so the
+routines do not duplicate it. Importing skills does not create triggers, schedules
+or storage; configure those with the bot platform's routine tools. If shared
+storage is unavailable, report that gap instead of promising deduplication.
+
+The delegate skill asks normal versus YOLO before a new session. A bot may accept
+only with explicit owner chat authorization for that session; this connector has
+no accept capability, so consent does not enable bot acceptance here. Never ask
+for the human token. An owner choosing YOLO runs
+[`scripts/auto-approve.sh SESSION_ID --enable-yolo`](scripts/auto-approve.sh)
+locally on the Mac. It uses local human credentials and weakens human review;
+deny rules are heuristic and cannot uncover all hidden side effects. It leaves
+denied/unknown requests pending, exits on idle or Ctrl-C, and needs a new opt-in
+for later turns. See the [risks and usage](README.md#optional-per-session-yolo-helper).
+Neither notification routine ever accepts approvals, even in YOLO sessions.

@@ -369,8 +369,17 @@ class Bridge:
                 self.store.execute('INSERT INTO approvals(id,session_id,rpc_id,method,status,created) VALUES(?,?,?,?,?,?)',
                                    (aid,sid,json.dumps(msg['id']),method,'pending',time.time()))
                 self.store.update(sid,status='approval')
+                command = p.get('command')
                 self.event(sid,'approval/required',{'request_id':aid,'method':method,
-                           'command':redact(str(p.get('command',''))),'reason':redact(str(p.get('reason','')))},True)
+                           'command':redact(command) if isinstance(command,str) else '',
+                           'review_complete':isinstance(command,str) and bool(command) and redact(command)==command
+                               and isinstance(p.get('cwd'),str) and bool(p['cwd']) and redact(p['cwd'])==p['cwd'],
+                           'cwd':redact(str(p.get('cwd',''))), 'item_id':p.get('itemId'),
+                           'extra_scope':bool(p.get('kind','command') != 'command' or p.get('environmentId')
+                                              or p.get('grantRoot') or p.get('additionalPermissions')
+                                              or p.get('networkApprovalContext') or p.get('proposedNetworkPolicyAmendments')
+                                              or p.get('proposedExecpolicyAmendment')),
+                           'reason':redact(str(p.get('reason','')))},True)
             else:
                 self.event(sid,'request/unsupported',{'method':method},True)
                 await self.servers[sid].write({'id':msg['id'],'error':{'code':-32601,'message':'Bridge does not support this request; denied'}})
@@ -404,7 +413,10 @@ class Bridge:
             if item.get('type')=='commandExecution':
                 data.update(command=redact(str(item.get('command',''))),exit_code=item.get('exitCode'))
             if item.get('type')=='fileChange':
-                data['files'] = [redact(str(c.get('path',''))) for c in item.get('changes',[])][:100]
+                paths = [c.get('path') for c in item.get('changes',[])]
+                data['files'] = [redact(str(path)) for path in paths][:100]
+                data['files_complete'] = bool(paths) and len(paths)<=100 and all(
+                    isinstance(path,str) and bool(path) and redact(path)==path for path in paths)
             if item.get('type')=='agentMessage' and method=='item/completed':
                 data['text'] = redact(item.get('text',''))
         elif method=='item/agentMessage/delta':

@@ -80,7 +80,9 @@ accounts or taking human ownership. Do not share your whole `.env`.
 The defaults are `workspace-write`, `on-request` and the human approval reviewer.
 The API accepts only `workspace-write`/`read-only` and `on-request`/`untrusted`;
 it offers no unrestricted sandbox or automatic-approval mode. A bot can decline
-or cancel a pending approval. A human accepts it explicitly in the local terminal.
+or cancel a pending approval. By default, a human accepts it explicitly in the local terminal.
+An optional owner-run YOLO helper can accept on that human's behalf for one session;
+see its risks below.
 Human approval applies to operations Codex flags; it is not a promise to ask
 before every edit or every permitted command.
 
@@ -162,15 +164,69 @@ the routine header authenticates to the receiver and is a separate secret.
 Receivers should deduplicate event IDs and verify signatures/timestamp freshness
 where supported. Delivery retries use the same ID; there is no exactly-once claim.
 
-Only approval pending (`approval/required`), login expired
-(`account/authentication_required`) and process disconnected (`process/lost`)
-need human alerts. The bridge also delivers progress and other urgent metadata;
-the receiving routine filters these, polls state and avoids noisy notifications.
+Alert on approval pending (`approval/required`), login expired
+(`account/authentication_required`) and process disconnected (`process/lost`).
+Send a short wrap-up for a finished or failed turn (`turn/completed`, `error`).
+Ignore progress-only and stale deliveries; check current state before reporting.
+Install both the webhook alert routine and the ten-minute watchdog backup below.
 
 `BRIDGE_WEBHOOK_MAX_EVENT_AGE_SEC` defaults to `900` (15 minutes). Startup and
 redelivery expire older queued events/deliveries; they remain in local history.
 Expired events cannot be re-alerted via webhook replay. Poll current status after
 an outage because an old but still-pending approval may have aged out of alerts.
+
+## Importable bot skills and backup monitoring
+
+Import these folders into the bot platform's skill library; each includes a
+`SKILL.md` with name/description frontmatter. Use their instructions as routine
+bodies when creating triggers. Importing files alone does not install a webhook
+or schedule:
+
+- [codex-delegate](skills/codex-delegate/SKILL.md): check reachability, ask the owner
+  about normal versus YOLO **before session creation**, keep one managed session
+  per repo, reuse idle sessions and follow logs with saved cursors.
+- [codex-approval-alert](skills/codex-approval-alert/SKILL.md): webhook-triggered
+  approval/auth/process alerts and short finished/failed-turn wrap-ups. Never accepts.
+- [codex-session-watchdog](skills/codex-session-watchdog/SKILL.md): schedule every
+  **10 minutes** as a backup for failed, dropped or expired webhook delivery.
+  Detect approvals pending over 5 minutes, unreported finished turns, sessions
+  without events for over 20 minutes and errors. Stay silent otherwise.
+
+Install both routines on the bot that owns Codex work. They share a private,
+durable ledger with the delegating bot: cursors, terminal job/turn IDs and incident
+fingerprints. Atomic report claims avoid repeats when webhook and watchdog race.
+The watchdog polls independently; it is not another webhook subscriber. At first
+installation, baseline historical completions rather than flooding old reports.
+
+## Optional per-session YOLO helper
+
+Normal mode keeps human review. A bot may accept only after explicit owner
+chat authorization **for that session**; this is necessary permission, not a tool
+capability. The current connector cannot accept approvals even with chat consent.
+Never provide the bot with the human token. For this release, the owner runs the
+[local helper](scripts/auto-approve.sh) on the Mac:
+
+```sh
+bash scripts/auto-approve.sh SESSION_ID --enable-yolo
+# Optional: append --config /absolute/path/to/private-config
+```
+
+This **weakens the human-approval guarantee**. It uses the Mac's human token and
+watches only the selected session's structured event stream; tmux need not be
+open. It accepts inspectable command/file approvals, holding requests for push,
+repository/release/PR creation or merge, recursive forced removal, privilege,
+download-to-shell pipelines, sensitive config/credentials, publication/deployment,
+expanded permission scopes and incomplete metadata. Held request IDs and reasons
+are printed once for human review via attach. File approvals require complete
+paths correlated to their item; older events without metadata are held.
+
+Deny rules are conservative **heuristics, not a security boundary**. Scripts,
+interpreters or indirection can hide side effects; file content is not inspected.
+Use this only for trusted work in a constrained repo, keep sandbox defaults and
+review changes. The helper exits when the session becomes idle or inactive, on
+Ctrl-C or on an API error; it never starts a turn. A later turn needs a new opt-in.
+Stopping the helper does not stop Codex or undo approvals already sent. Neither
+alert nor watchdog ever accepts, including for YOLO sessions.
 
 ## Restart behavior and known issues
 

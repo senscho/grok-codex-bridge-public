@@ -40,3 +40,8 @@ Native viewing was verified separately: `codex resume THREAD_ID` with the same
 `CODEX_HOME` opens an app-server-held thread read-only ("opened elsewhere"). The
 bridge terminal remains the approval/control surface. Full history API support
 is version dependent; retained bridge events are the fallback.
+
+The optional local approval helper has tests for deny rules, quoted commands,
+separate removal flags, sensitive paths, symlink escapes, complete file metadata,
+per-session isolation, held/stale requests, idle exit and API failure. Approval
+metadata remains redacted and Grok credentials still cannot accept approvals.
